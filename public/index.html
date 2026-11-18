@@ -185,6 +185,7 @@
         <button class="tab owner-only" data-admin-tab="roles">👥 Roles</button>
         <button class="tab owner-only" data-admin-tab="stats">📊 Analíticas</button>
         <button class="tab owner-only" data-admin-tab="notices">📢 Avisos</button>
+        <button class="tab owner-only" data-admin-tab="emojis">😀 Emojis</button>
       </div>
 
       <div id="admin-orders" data-admin-panel="orders">
@@ -231,6 +232,19 @@
           <button type="button" class="chip" data-range="0">Todo</button>
         </div>
         <div id="an-body"></div>
+      </div>
+
+      <div id="admin-emojis" data-admin-panel="emojis" class="hidden owner-only">
+        <div class="card">
+          <h3>😀 Emojis de la web</h3>
+          <p class="muted small">Escribe al lado el emoji nuevo y pulsa «Guardar emojis»: se cambia en toda la web para todo el mundo. Déjalo vacío para dejar el original. Lo que escribe la gente (pedidos, chat) no se toca.</p>
+          <input id="emoji-search" type="search" placeholder="Buscar (ej: chat, pago, oferta…)" />
+          <div id="emoji-rows" class="emoji-rows"></div>
+          <div class="actions">
+            <button type="button" class="btn primary" id="save-emojis">Guardar emojis</button>
+            <button type="button" class="btn ghost" id="reset-emojis">Volver todos a los originales</button>
+          </div>
+        </div>
       </div>
 
       <div id="admin-notices" data-admin-panel="notices" class="hidden owner-only">

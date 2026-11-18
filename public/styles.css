@@ -430,3 +430,12 @@ body.guest #my-orders-wrap, body.guest #verify-banner { display: none !important
 body.guest #guest-hero { display: block !important; text-align: center; margin: 8px 0 14px; }
 #guest-hero h1 { font-size: 1.8rem; }
 .nav-login { background: #fff; color: var(--primary); border-color: #fff; }
+
+/* ---------- Editor de emojis ---------- */
+.emoji-rows { display: grid; gap: 6px; margin: 10px 0; max-height: 60vh; overflow-y: auto; }
+.emoji-row { display: grid; grid-template-columns: 40px 16px 64px 1fr; align-items: center; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--line); }
+.emoji-row.hidden { display: none; }
+.em-orig { font-size: 1.6rem; text-align: center; }
+.em-arrow { color: var(--muted); }
+.em-new { font-size: 1.3rem; text-align: center; padding: 6px; }
+.em-label { font-size: .88rem; color: var(--muted); }
