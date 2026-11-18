@@ -13,27 +13,41 @@ export const firebaseConfig = {
   appId: "1:000000000000:web:0000000000000000",
 };
 
-// 2) Correo del administrador (el único que puede aceptar, poner precios, etc.)
+// 2) Nombre de la web (sale arriba y en la pestaña del navegador)
+export const SITE_NAME = "Impresión 3D";
+
+// 3) Correo del administrador (el único que puede aceptar, poner precios, etc.)
 //    OJO: si lo cambias, cámbialo también en firestore.rules
 export const ADMIN_EMAIL = "o39459309@gmail.com";
 
-// 3) Suplemento por versión llavero (en euros)
+// 4) Suplemento por versión llavero (en euros, por pedido)
 export const KEYCHAIN_EXTRA = 0.10;
 
-// 4) Códigos de apoyo válidos (en minúsculas). Su uso se cuenta en el panel admin.
-export const PROMO_CODES = ["manchis14"];
+// 5) Productos predeterminados con su precio (en euros)
+export const PRODUCTS = [
+  { id: "fennec", emoji: "🚗", name: "Fennec", price: 0.50 },
+  { id: "balon", emoji: "⚽", name: "Balón", price: 0.25 },
+];
 
-// 5) Ofertas que se muestran a tus amigos
+// 6) Códigos de apoyo válidos (en minúsculas).
+//    discount = % de descuento · rickroll = sale el vídeo 5 segundos al ponerlo
+export const PROMO_CODES = {
+  manchis14: { discount: 10, rickroll: true },
+};
+
+// 7) Ofertas. "items" = lo que incluye, "free" = lo que sale gratis
 export const OFFERS = [
   {
     id: "fennecs-balon",
     emoji: "🚗🚗⚽",
     title: "2 Fennecs + balón GRATIS",
-    description: "Pide dos Fennecs y te regalo un balón impreso en 3D.",
+    description: "Pide dos Fennecs y te regalo un balón.",
+    items: { fennec: 2, balon: 1 },
+    free: { balon: 1 },
   },
 ];
 
-// 6) Sitios de recogida que te salen como sugerencia al aceptar un pedido
+// 8) Sitios de recogida que te salen como sugerencia al aceptar un pedido
 export const PICKUP_PLACES = [
   // "Puerta del instituto",
   // "Mi casa",

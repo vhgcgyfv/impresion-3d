@@ -78,9 +78,12 @@
       <div class="card">
         <h2>Nuevo pedido</h2>
         <form id="order-form" class="form">
-          <label>¿Qué quieres que te imprima?
-            <textarea name="description" rows="4" maxlength="1000" required
-              placeholder="Ej: Un Fennec rojo de unos 8 cm y un balón…"></textarea>
+          <div class="field-title">Elige productos</div>
+          <div id="products" class="products"></div>
+
+          <label>¿Algo más o algún detalle? (color, tamaño, otra figura…)
+            <textarea name="description" rows="3" maxlength="1000"
+              placeholder="Ej: Un Fennec rojo y otro azul. O cualquier otra cosa que quieras."></textarea>
           </label>
 
           <label>Oferta
@@ -95,8 +98,11 @@
           </label>
 
           <label>Código de apoyo (opcional)
-            <input name="promoCode" maxlength="30" autocomplete="off" placeholder="Ej: manchis14" />
+            <input name="promoCode" maxlength="30" autocomplete="off" placeholder="Si tienes uno, ponlo aquí" />
           </label>
+          <div id="code-msg" class="code-msg"></div>
+
+          <div id="order-summary" class="summary hidden"></div>
 
           <p class="muted small">💶 Solo pago en efectivo al recoger. Te diré el precio, la hora y el sitio cuando acepte el pedido.</p>
           <button class="btn primary" type="submit">Enviar pedido</button>
@@ -143,6 +149,13 @@
 
   <datalist id="places-list"></datalist>
   <div id="toast" class="toast hidden"></div>
+
+  <div id="rick" class="rick hidden" role="dialog" aria-label="Sorpresa">
+    <div class="rick-box">
+      <div id="rick-frame" class="rick-frame"></div>
+      <div class="rick-count">Tu descuento llega en <span id="rick-count">5</span>…</div>
+    </div>
+  </div>
 
   <script type="module" src="app.js"></script>
 </body>

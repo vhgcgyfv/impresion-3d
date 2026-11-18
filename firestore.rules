@@ -40,11 +40,13 @@ service cloud.firestore {
       allow create: if signedIn()
         && request.resource.data.keys().hasOnly([
              'uid', 'userName', 'userEmail', 'description', 'offer',
-             'keychain', 'promoCode', 'status', 'paid', 'createdAt'])
+             'items', 'keychain', 'promoCode', 'status', 'paid', 'createdAt'])
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.userEmail == request.auth.token.email
         && shortString(request.resource.data.userName, 1, 60)
-        && shortString(request.resource.data.description, 1, 1000)
+        && shortString(request.resource.data.description, 0, 1000)
+        && request.resource.data.items is map
+        && request.resource.data.items.size() <= 20
         && shortString(request.resource.data.offer, 0, 40)
         && shortString(request.resource.data.promoCode, 0, 30)
         && request.resource.data.keychain is bool

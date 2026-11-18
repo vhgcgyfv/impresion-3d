@@ -9,7 +9,7 @@ import {
   query, where, orderBy, onSnapshot, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {
-  firebaseConfig, ADMIN_EMAIL, KEYCHAIN_EXTRA, PROMO_CODES, OFFERS, PICKUP_PLACES,
+  firebaseConfig, SITE_NAME, ADMIN_EMAIL, KEYCHAIN_EXTRA, PRODUCTS, PROMO_CODES, OFFERS, PICKUP_PLACES,
 } from "./config.js";
 
 // ---------------------------------------------------------------- utilidades
@@ -30,6 +30,64 @@ const fmtPickup = (v) => {
 };
 const shortId = (id) => id.slice(0, 6).toUpperCase();
 const offerTitle = (id) => OFFERS.find((o) => o.id === id)?.title || id;
+const CODE_LIST = Object.keys(PROMO_CODES);
+const codeInfo = (c) => (c && PROMO_CODES[c]) || null;
+const productOf = (id) => PRODUCTS.find((p) => p.id === id);
+const itemsText = (items) => Object.entries(items || {}).filter(([, q]) => q > 0)
+  .map(([id, q]) => `${q}× ${productOf(id)?.name || id}`).join(", ");
+
+// Calcula el precio de un pedido. Si se pasa basePrice (el que pone el admin), se usa ese.
+function calcPrice({ items = {}, offer = "", keychain = false, promoCode = "" }, basePrice) {
+  let subtotal = 0;
+  for (const [id, q] of Object.entries(items)) subtotal += (productOf(id)?.price || 0) * q;
+  let offerDiscount = 0;
+  const of = OFFERS.find((o) => o.id === offer);
+  if (of?.free && Object.entries(of.items || {}).every(([id, q]) => (items[id] || 0) >= q)) {
+    for (const [id, q] of Object.entries(of.free)) offerDiscount += (productOf(id)?.price || 0) * q;
+  }
+  const base = round2(basePrice ?? subtotal - offerDiscount);
+  const extra = keychain ? KEYCHAIN_EXTRA : 0;
+  const pct = codeInfo(promoCode)?.discount || 0;
+  const codeDiscount = round2((base + extra) * pct / 100);
+  return {
+    subtotal: round2(subtotal), offerDiscount: round2(offerDiscount),
+    base, extra, pct, codeDiscount, total: round2(base + extra - codeDiscount),
+  };
+}
+
+// Desglose del precio en HTML
+function breakdownHtml(c, { showSubtotal = true } = {}) {
+  const rows = [];
+  if (showSubtotal && c.offerDiscount) {
+    rows.push(["Productos", money(c.subtotal)], ["🔥 Oferta", "−" + money(c.offerDiscount)]);
+  }
+  if (c.extra || c.pct) rows.push(["Base", money(c.base)]);
+  if (c.extra) rows.push(["🔑 Llavero", "+" + money(c.extra)]);
+  if (c.pct) rows.push([`🏷️ Código (−${c.pct}%)`, "−" + money(c.codeDiscount)]);
+  return rows.map(([a, b]) => `<div class="row"><span>${a}</span><span>${b}</span></div>`).join("");
+}
+
+// ---------------------------------------------------------------- rickroll
+function rickroll(onDone) {
+  const ov = $("#rick");
+  const frame = $("#rick-frame");
+  const count = $("#rick-count");
+  frame.innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?autoplay=1&controls=0&modestbranding=1&rel=0"
+    allow="autoplay; encrypted-media" title="Sorpresa" frameborder="0"></iframe>`;
+  show(ov);
+  let left = 5;
+  count.textContent = left;
+  const t = setInterval(() => {
+    left--;
+    count.textContent = left;
+    if (left <= 0) {
+      clearInterval(t);
+      frame.innerHTML = "";
+      show(ov, false);
+      onDone?.();
+    }
+  }, 1000);
+}
 
 const STATUS = {
   pendiente: "⏳ Pendiente",
@@ -74,6 +132,8 @@ async function withBusy(btn, fn) {
 }
 
 // ---------------------------------------------------------------- arranque
+document.title = SITE_NAME;
+$(".brand span").textContent = SITE_NAME;
 const configured = firebaseConfig.apiKey && !firebaseConfig.apiKey.startsWith("PEGA");
 if (!configured) {
   show($("#loading"), false);
@@ -112,15 +172,89 @@ function start() {
       <p>${esc(o.description)}</p>
       <button class="btn small" data-offer="${esc(o.id)}">La quiero</button>
     </div>`).join("") : `<p class="muted">Ahora mismo no hay ofertas.</p>`;
+  $("#products").innerHTML = PRODUCTS.map((p) => `
+    <div class="product">
+      <div class="p-emoji">${esc(p.emoji)}</div>
+      <div class="p-info"><strong>${esc(p.name)}</strong><span class="muted small">${money(p.price)}</span></div>
+      <div class="stepper">
+        <button type="button" class="btn small" data-step="-1" data-pid="${esc(p.id)}" aria-label="Quitar">−</button>
+        <input type="number" min="0" max="50" value="0" data-qty="${esc(p.id)}" aria-label="Cantidad de ${esc(p.name)}" />
+        <button type="button" class="btn small" data-step="1" data-pid="${esc(p.id)}" aria-label="Añadir">+</button>
+      </div>
+    </div>`).join("");
+
+  const getItems = () => {
+    const items = {};
+    $$("[data-qty]").forEach((i) => {
+      const q = Math.max(0, Math.min(50, parseInt(i.value, 10) || 0));
+      if (q) items[i.dataset.qty] = q;
+    });
+    return items;
+  };
+  const setItems = (items) => $$("[data-qty]").forEach((i) => { i.value = items[i.dataset.qty] || 0; });
+
+  let codeApplied = "";
+  function updateSummary() {
+    const f = $("#order-form");
+    const code = f.promoCode.value.trim().toLowerCase();
+    const c = calcPrice({
+      items: getItems(), offer: f.offer.value, keychain: f.keychain.checked,
+      promoCode: code === codeApplied ? code : "",
+    });
+    const box = $("#order-summary");
+    const any = Object.keys(getItems()).length;
+    box.innerHTML = any ? `${breakdownHtml(c)}
+      <div class="row total"><span>Total aproximado</span><span>${money(c.total)}</span></div>
+      <div class="muted small">El precio final te lo confirmo al aceptar el pedido.</div>` : "";
+    show(box, any);
+  }
+
+  $("#products").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-step]");
+    if (!b) return;
+    const inp = $(`[data-qty="${b.dataset.pid}"]`);
+    inp.value = Math.max(0, Math.min(50, (parseInt(inp.value, 10) || 0) + Number(b.dataset.step)));
+    updateSummary();
+  });
+  $("#order-form").addEventListener("input", updateSummary);
+  $("#order-form").addEventListener("change", updateSummary);
+
+  offerSelect.addEventListener("change", () => {
+    const o = OFFERS.find((x) => x.id === offerSelect.value);
+    if (o?.items) setItems({ ...getItems(), ...Object.fromEntries(
+      Object.entries(o.items).map(([id, q]) => [id, Math.max(q, getItems()[id] || 0)])) });
+    updateSummary();
+  });
+
   $("#offers").addEventListener("click", (e) => {
     const id = e.target.closest("[data-offer]")?.dataset.offer;
     if (!id) return;
-    const o = OFFERS.find((x) => x.id === id);
     offerSelect.value = id;
-    const ta = $("#order-form textarea");
-    if (!ta.value.trim()) ta.value = `Oferta: ${o.title}\n`;
-    ta.focus();
-    ta.scrollIntoView({ behavior: "smooth", block: "center" });
+    offerSelect.dispatchEvent(new Event("change"));
+    $("#order-form").scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+
+  // Código de apoyo: al escribirlo bien sale la sorpresa y luego el descuento
+  const codeInput = $("#order-form [name=promoCode]");
+  const codeMsg = $("#code-msg");
+  codeInput.addEventListener("input", () => {
+    const code = codeInput.value.trim().toLowerCase();
+    const info = codeInfo(code);
+    if (!info) {
+      codeApplied = "";
+      codeMsg.textContent = "";
+      updateSummary();
+      return;
+    }
+    if (codeApplied === code) return;
+    const apply = () => {
+      codeApplied = code;
+      codeMsg.textContent = `✅ Código aplicado: ${info.discount}% de descuento`;
+      updateSummary();
+      if (info.discount) toast(`🎉 ¡${info.discount}% de descuento aplicado!`);
+    };
+    codeInput.blur();
+    if (info.rickroll) rickroll(apply); else apply();
   });
 
   // ---------- Login / registro ----------
@@ -265,8 +399,11 @@ function start() {
     const f = e.target;
     const description = f.description.value.trim();
     const promoCode = f.promoCode.value.trim().toLowerCase();
-    if (!description) return toast("Escribe qué quieres pedir.", true);
-    if (promoCode && !PROMO_CODES.includes(promoCode)) {
+    const items = getItems();
+    if (!description && !Object.keys(items).length) {
+      return toast("Elige algún producto o escribe qué quieres pedir.", true);
+    }
+    if (promoCode && !codeInfo(promoCode)) {
       return toast("Ese código no existe. Revísalo o déjalo vacío.", true);
     }
     withBusy(f.querySelector("button[type=submit]"), async () => {
@@ -275,6 +412,7 @@ function start() {
         userName: (profileName || currentUser.email).slice(0, 60),
         userEmail: currentUser.email,
         description: description.slice(0, 1000),
+        items,
         offer: f.offer.value,
         keychain: f.keychain.checked,
         promoCode,
@@ -283,6 +421,9 @@ function start() {
         createdAt: serverTimestamp(),
       });
       f.reset();
+      codeApplied = "";
+      codeMsg.textContent = "";
+      updateSummary();
       toast("¡Pedido enviado! Te avisaré aquí cuando lo acepte.");
     });
   });
@@ -290,9 +431,10 @@ function start() {
   // ---------- Mis pedidos ----------
   function orderTags(o) {
     const t = [];
+    if (itemsText(o.items)) t.push(`<span class="tag">🧊 ${esc(itemsText(o.items))}</span>`);
     if (o.offer) t.push(`<span class="tag">🔥 ${esc(offerTitle(o.offer))}</span>`);
     if (o.keychain) t.push(`<span class="tag">🔑 Llavero (+${money(KEYCHAIN_EXTRA)})</span>`);
-    if (o.promoCode) t.push(`<span class="tag">🏷️ ${esc(o.promoCode)}</span>`);
+    if (o.promoCode) t.push(`<span class="tag">🏷️ ${esc(o.promoCode)}${codeInfo(o.promoCode)?.discount ? ` (−${codeInfo(o.promoCode).discount}%)` : ""}</span>`);
     return t.length ? `<div class="tags">${t.join("")}</div>` : "";
   }
 
@@ -306,6 +448,7 @@ function start() {
   function pickupBox(o) {
     if (!BILLABLE.includes(o.status)) return "";
     return `<div class="pickup">
+      ${breakdownHtml(calcPrice(o, o.price ?? 0), { showSubtotal: false })}
       <div>Precio: <strong>${money(o.total)}</strong> <span class="small">(en efectivo)</span></div>
       <div>🕒 Recogida: <strong>${esc(fmtPickup(o.pickupTime))}</strong></div>
       <div>📍 Lugar: <strong>${esc(o.pickupPlace)}</strong></div>
@@ -327,7 +470,7 @@ function start() {
             ${payBadge(o)}
           </div>
         </div>
-        <div class="order-desc">${esc(o.description)}</div>
+        ${o.description ? `<div class="order-desc">${esc(o.description)}</div>` : ""}
         ${orderTags(o)}
         ${pickupBox(o)}
         ${o.adminNote ? `<div class="note">💬 ${esc(o.adminNote)}</div>` : ""}
@@ -365,14 +508,14 @@ function start() {
     const cobrado = billable.filter((o) => o.paid).reduce((s, o) => s + (o.total || 0), 0);
     const debe = billable.filter((o) => !o.paid).reduce((s, o) => s + (o.total || 0), 0);
     const pend = allOrders.filter((o) => o.status === "pendiente").length;
-    const codeUses = allOrders.filter((o) => o.promoCode === PROMO_CODES[0] && !["cancelado"].includes(o.status));
+    const codeUses = allOrders.filter((o) => o.promoCode === CODE_LIST[0] && !["cancelado"].includes(o.status));
     const codePeople = new Set(codeUses.map((o) => o.uid)).size;
     $("#stats").innerHTML = `
       <div class="stat"><div class="n">${pend}</div><div class="l">Pedidos pendientes</div></div>
       <div class="stat"><div class="n">${allOrders.filter((o) => ["aceptado", "listo"].includes(o.status)).length}</div><div class="l">Aceptados / listos</div></div>
       <div class="stat"><div class="n">${money(cobrado)}</div><div class="l">Cobrado</div></div>
       <div class="stat"><div class="n">${money(debe)}</div><div class="l">Te deben</div></div>
-      ${PROMO_CODES.length ? `<div class="stat hl"><div class="n">${codePeople}</div><div class="l">Personas con «${esc(PROMO_CODES[0])}» (${codeUses.length} pedidos)</div></div>` : ""}`;
+      ${CODE_LIST.length ? `<div class="stat hl"><div class="n">${codePeople}</div><div class="l">Personas con «${esc(CODE_LIST[0])}» (${codeUses.length} pedidos)</div></div>` : ""}`;
   }
 
   function renderPlaces() {
@@ -399,12 +542,14 @@ function start() {
       d.setHours(17, 0, 0, 0);
       defTime = new Date(d - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 16);
     }
+    const suggested = calcPrice(o);
+    const startPrice = o.price ?? (Object.keys(o.items || {}).length ? suggested.base : "");
     return `
       <div class="accept-form" data-form="${o.id}">
-        <label>Precio (€)${o.keychain ? " sin llavero" : ""}
-          <input type="number" name="price" min="0" step="0.01" inputmode="decimal" value="${o.price ?? ""}" placeholder="0,00" />
+        <label>Precio base (€)${o.keychain || codeInfo(o.promoCode) ? " — sin llavero ni descuento" : ""}
+          <input type="number" name="price" min="0" step="0.01" inputmode="decimal" value="${startPrice}" placeholder="0,00" />
         </label>
-        <div class="total-preview" data-total>${o.keychain ? `+ llavero ${money(KEYCHAIN_EXTRA)}` : ""}</div>
+        <div class="total-preview" data-total>${startPrice === "" ? "" : totalPreview(o, Number(startPrice))}</div>
         <label>🕒 Hora de recogida
           <input type="datetime-local" name="pickupTime" value="${esc(defTime)}" />
         </label>
@@ -438,7 +583,7 @@ function start() {
             ${payBadge(o)}
           </div>
         </div>
-        <div class="order-desc">${esc(o.description)}</div>
+        ${o.description ? `<div class="order-desc">${esc(o.description)}</div>` : ""}
         ${orderTags(o)}
         ${pickupBox(o)}
         ${o.adminNote && !isPending ? `<div class="note">💬 ${esc(o.adminNote)}</div>` : ""}
@@ -475,9 +620,13 @@ function start() {
     const form = e.target.closest("[data-form]");
     const o = allOrders.find((x) => x.id === form.dataset.form);
     const p = parseFloat(e.target.value.replace(",", "."));
-    form.querySelector("[data-total]").textContent = isNaN(p) ? "" :
-      `Total: ${money(round2(p + (o?.keychain ? KEYCHAIN_EXTRA : 0)))}${o?.keychain ? " (con llavero)" : ""}`;
+    form.querySelector("[data-total]").innerHTML = isNaN(p) ? "" : totalPreview(o, p);
   });
+
+  function totalPreview(o, base) {
+    const c = calcPrice(o, base);
+    return `${breakdownHtml(c, { showSubtotal: false })}<div class="row total"><span>Total</span><span>${money(c.total)}</span></div>`;
+  }
 
   function readPriceForm(id) {
     const form = $(`#admin-order-list [data-form="${id}"]`);
@@ -489,9 +638,11 @@ function start() {
     if (!pickupTime) throw new Error("Pon la hora de recogida.");
     if (!pickupPlace) throw new Error("Pon el lugar de recogida.");
     const o = allOrders.find((x) => x.id === id);
+    const c = calcPrice(o, price);
     return {
-      price: round2(price),
-      total: round2(price + (o.keychain ? KEYCHAIN_EXTRA : 0)),
+      price: c.base,
+      discountPct: c.pct,
+      total: c.total,
       pickupTime, pickupPlace, adminNote,
     };
   }
@@ -566,7 +717,7 @@ function start() {
             </div>
             ${p.owed.map((o) => `
               <div class="actions" style="align-items:center;justify-content:space-between">
-                <span class="small">#${shortId(o.id)} · ${esc(o.description.slice(0, 50))}${o.description.length > 50 ? "…" : ""} · <strong>${money(o.total)}</strong></span>
+                <span class="small">#${shortId(o.id)} · ${esc((o.description || itemsText(o.items)).slice(0, 50))}${(o.description || itemsText(o.items)).length > 50 ? "…" : ""} · <strong>${money(o.total)}</strong></span>
                 <button class="btn ok small" data-pay="${o.id}">💶 Pagado</button>
               </div>`).join("")}
           </div>`).join("") : `<div class="empty">Nadie te debe nada 🎉</div>`}
@@ -597,7 +748,7 @@ function start() {
 
   // ---------- Códigos de apoyo ----------
   function renderCodes() {
-    $("#admin-codes").innerHTML = PROMO_CODES.map((code) => {
+    $("#admin-codes").innerHTML = CODE_LIST.map((code) => {
       const uses = allOrders.filter((o) => o.promoCode === code);
       const valid = uses.filter((o) => o.status !== "cancelado");
       const people = new Map();

@@ -3,7 +3,8 @@
 Web para que tus amigos te pidan impresiones 3D:
 
 - **Cuentas**: cada amigo crea su cuenta (correo + contraseña o Google).
-- **Pedidos**: escriben en un cuadro de texto lo que quieren, pueden elegir una **oferta**, la **versión llavero (+0,10 €)** y un **código de apoyo** (`manchis14`).
+- **Pedidos**: eligen productos con precio fijo (**Fennec 0,50 €**, **Balón 0,25 €**), escriben detalles en un cuadro de texto, pueden elegir una **oferta**, la **versión llavero (+0,10 €)** y un **código de apoyo**. Ven el total aproximado al momento.
+- **Código `manchis14`**: al escribirlo sale una sorpresa de 5 segundos 🎵 y luego se aplica un **10 % de descuento**.
 - **Solo pago en efectivo.**
 - **Panel de admin** (solo `o39459309@gmail.com`):
   - Aceptar / rechazar pedidos poniendo **precio, hora y lugar de recogida** (y una nota opcional).
@@ -46,14 +47,22 @@ Pásale el enlace a tus amigos y listo 🎉
 
 ---
 
+## Usar tu propio dominio (opcional)
+La web se publica en `https://<tu-usuario>.github.io/impresion-3d/`. Si quieres una dirección propia (p. ej. `mis3d.es`):
+1. Cómprala en cualquier registrador (unos 10 €/año).
+2. En GitHub → **Settings** → **Pages** → **Custom domain**, escríbela y sigue las instrucciones de DNS.
+3. Añade ese dominio también en Firebase → Authentication → Settings → **Dominios autorizados**.
+
 ## Cambiar cosas fáciles
 Todo está en [`public/config.js`](public/config.js):
 
 | Qué | Dónde |
 |---|---|
-| Ofertas | `OFFERS` (añade más bloques `{ id, emoji, title, description }`) |
+| Nombre de la web | `SITE_NAME` |
+| Productos y precios | `PRODUCTS` |
+| Ofertas | `OFFERS` (qué incluye y qué sale gratis) |
 | Precio del llavero | `KEYCHAIN_EXTRA` |
-| Códigos de apoyo | `PROMO_CODES` |
+| Códigos de apoyo (descuento y sorpresa) | `PROMO_CODES` |
 | Sitios de recogida sugeridos | `PICKUP_PLACES` |
 
 Si cambias el correo del admin, cámbialo en `config.js` **y** en `firestore.rules` (y vuelve a publicar las reglas).
