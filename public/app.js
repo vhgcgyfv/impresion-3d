@@ -9,7 +9,7 @@ import {
   query, where, orderBy, onSnapshot, serverTimestamp, increment, limit, runTransaction,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {
-  firebaseConfig, SITE_NAME, PRICE_NOTICE, EMAILJS, ADMIN_EMAIL, COOWNER_EMAILS, BANNED_EMAILS, KEYCHAIN_EXTRA, PRODUCTS, PROMO_CODES, OFFERS, PICKUP_PLACES,
+  firebaseConfig, SITE_NAME, PRICE_NOTICE, EMAILJS, ADMIN_EMAIL, COOWNER_EMAILS, ROLE_SEEDS, KEYCHAIN_EXTRA, PRODUCTS, PROMO_CODES, OFFERS, PICKUP_PLACES,
 } from "./config.js";
 
 // ---------------------------------------------------------------- utilidades
@@ -277,12 +277,23 @@ async function withBusy(btn, fn) {
 }
 
 // ---------------------------------------------------------------- arranque
-// Aviso de cambio de precios (no depende de Firebase)
-$$(".price-notice").forEach((el) => {
-  if (!PRICE_NOTICE?.title && !PRICE_NOTICE?.text) return;
-  el.innerHTML = `<div class="pn-title">${esc(PRICE_NOTICE.title || "")}</div><div class="pn-text">${esc(PRICE_NOTICE.text || "")}</div>`;
-  show(el);
-});
+// Avisos de arriba del todo. Se editan en el panel (settings/notices);
+// mientras no haya ninguno guardado se usa PRICE_NOTICE de config.js
+const NOTICE_COLORS = { rojo: "🔴 Rojo", amarillo: "🟡 Amarillo", verde: "🟢 Verde", azul: "🔵 Azul" };
+let notices = (PRICE_NOTICE?.title || PRICE_NOTICE?.text)
+  ? [{ title: PRICE_NOTICE.title || "", text: PRICE_NOTICE.text || "", color: "rojo", active: true }] : [];
+function noticeHtml(n) {
+  const c = NOTICE_COLORS[n.color] ? n.color : "rojo";
+  return `<div class="notice notice-${c}" role="${c === "rojo" ? "alert" : "status"}">
+    ${n.title ? `<div class="pn-title">${esc(n.title)}</div>` : ""}
+    ${n.text ? `<div class="pn-text">${esc(n.text)}</div>` : ""}
+  </div>`;
+}
+function renderNotices() {
+  const html = notices.filter((n) => n.active && (n.title || n.text)).map(noticeHtml).join("");
+  $$(".notices").forEach((el) => { el.innerHTML = html; });
+}
+renderNotices();
 document.title = SITE_NAME;
 $(".brand span").textContent = SITE_NAME;
 const configured = firebaseConfig.apiKey && !firebaseConfig.apiKey.startsWith("PEGA");
@@ -323,31 +334,7 @@ function start() {
       <p>${esc(o.description)}</p>
       <button class="btn small" data-offer="${esc(o.id)}">La quiero</button>
     </div>`).join("") : `<p class="muted">Ahora mismo no hay ofertas.</p>`;
-  // Recuadro grande que explica el precio (portada y página de pedidos)
-  function renderValueBox() {
-    const prices = catalog.map((p) => Number(p.price)).filter((x) => x > 0);
-    const from = prices.length ? money(Math.min(...prices)) : "";
-    const html = `
-      <div class="vb-head">💡 ¿Por qué cuesta lo que cuesta?</div>
-      <p class="vb-sub">Cada figura se imprime <strong>una a una, solo para ti</strong>. El precio solo cubre lo que cuesta hacerla:</p>
-      <div class="vb-grid">
-        <div class="vb-item"><span class="vb-ico">🧵</span><strong>Filamento</strong><small>El plástico con el que se imprime</small></div>
-        <div class="vb-item"><span class="vb-ico">⚡</span><strong>Electricidad</strong><small>La impresora pasa horas encendida</small></div>
-        <div class="vb-item"><span class="vb-ico">⏱️</span><strong>Tiempo</strong><small>Cada pieza tarda horas en imprimirse</small></div>
-        <div class="vb-item"><span class="vb-ico">🛠️</span><strong>Esfuerzo</strong><small>Prepararla, quitar soportes y dejarla bien acabada</small></div>
-      </div>
-      <ul class="vb-why">
-        ${from ? `<li>💸 <span><strong>Desde ${from}</strong>: precio de amigo, no de tienda</span></li>` : ""}
-        <li>🎨 <span><strong>Hecho a tu gusto</strong>: me dices color, tamaño o detalles</span></li>
-        <li>📦 <span><strong>Sin gastos de envío</strong>: lo recoges en mano</span></li>
-        <li>💶 <span><strong>Nada por adelantado</strong>: pagas en efectivo al recogerlo</span></li>
-        <li>🎁 <span><strong>${CODE_LIST.length ? "Ofertas y códigos de descuento" : "Ofertas"}</strong> para ahorrar aún más</span></li>
-      </ul>`;
-    $$(".value-box").forEach((el) => { el.innerHTML = html; });
-  }
-
   function renderProducts() {
-    renderValueBox();
     const prev = getItems();
     $("#keychain-price").textContent = `(+${money(keychainExtra)})`;
     $("#products").innerHTML = catalog.length ? catalog.map((p) => `
@@ -451,6 +438,14 @@ function start() {
     codeInput.blur();
     if (info.rickroll) rickroll(apply); else apply();
   });
+
+  // Avisos en directo
+  onSnapshot(doc(db, "settings", "notices"), (snap) => {
+    if (!snap.exists()) return;
+    notices = Array.isArray(snap.data().items) ? snap.data().items : [];
+    renderNotices();
+    if (isAdmin) renderNoticeEditor();
+  }, (e) => console.error(e));
 
   // Stock en directo (stock/{producto} = { qty }). Sin documento = sin límite.
   let stock = {};
@@ -703,14 +698,48 @@ function start() {
       return;
     }
     show($("#nav-client"));
-    const emailRole = roleOfEmail(user.email);
+    // Rango: dueño por su correo; el resto, el que le dé el dueño en el panel (roles/{uid})
+    let emailRole = roleOfEmail(user.email);
+    if (!emailRole) {
+      try {
+        const r = await getDoc(doc(db, "roles", user.uid));
+        if (r.exists() && r.data().role === "coowner") emailRole = "coowner";
+      } catch (e) { console.error(e); }
+      // si le dan o le quitan el rango con la web abierta, se recarga
+      unsubs.push(onSnapshot(doc(db, "roles", user.uid), (s) => {
+        const nr = s.exists() && s.data().role === "coowner" ? "coowner" : null;
+        if (nr !== emailRole) location.reload();
+      }, () => {}));
+    }
     const emailIsAdmin = Boolean(emailRole);
-    isAdmin = emailIsAdmin && user.emailVerified;
+    if (emailIsAdmin && !user.emailVerified) {
+      // ¿ya ha abierto el enlace? actualizar sin tener que salir y entrar
+      try {
+        await user.reload();
+        if (auth.currentUser?.emailVerified) await auth.currentUser.getIdToken(true);
+      } catch (e) { console.error(e); }
+    }
+    const verifiedNow = Boolean(auth.currentUser?.emailVerified);
+    if (emailRole === "coowner" && !verifiedNow) {
+      // mandarle solo el enlace para activar el rango (como mucho una vez al día)
+      const key = "rankLink:" + user.uid;
+      let last = 0;
+      try { last = Number(localStorage.getItem(key)) || 0; } catch { /* sin almacenamiento */ }
+      if (Date.now() - last > 864e5) {
+        sendEmailVerification(user).then(() => {
+          try { localStorage.setItem(key, String(Date.now())); } catch { /* ignorar */ }
+          toast("📧 Te he enviado un enlace a tu correo para activar tu rango de co-dueño.");
+        }).catch((e) => console.error(e));
+      }
+    }
+    isAdmin = emailIsAdmin && verifiedNow;
     myRole = isAdmin ? emailRole : null;
     document.body.classList.toggle("coowner", myRole === "coowner");
     $("#admin-title").textContent = myRole === "coowner" ? "🤝 Panel de co-dueño" : "🛠️ Panel de administrador";
-    show($("#verify-banner"), (emailIsAdmin || !CODES_ON) && !user.emailVerified);
-    $("#verify-why").textContent = emailIsAdmin ? "para activar el panel de administrador" : "para poder hacer pedidos";
+    show($("#verify-banner"), (emailIsAdmin || !CODES_ON) && !verifiedNow);
+    $("#verify-email").textContent = user.email;
+    $("#verify-why").textContent = emailRole === "coowner" ? "para activar tu rango de 🤝 co-dueño"
+      : emailIsAdmin ? "para activar el panel de administrador" : "para poder hacer pedidos";
     show($("#nav-admin"), isAdmin);
     show($("#nav-chat"), !emailIsAdmin);
 
@@ -751,12 +780,22 @@ function start() {
       if (myRole === "owner") {
         unsubs.push(onSnapshot(collection(db, "bans"), (snap) => {
           allBans = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-          migrateConfigBans();
           renderBans();
         }, (e) => console.error(e)));
         unsubs.push(onSnapshot(collection(db, "users"), (snap) => {
           allUsers = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
           renderBans();
+          renderRoles();
+          renderAnalytics();
+          runSeeds();
+        }, (e) => console.error(e)));
+        unsubs.push(onSnapshot(collection(db, "roles"), (snap) => {
+          allRoles = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          renderRoles();
+        }, (e) => console.error(e)));
+        unsubs.push(onSnapshot(doc(db, "settings", "migrations"), (snap) => {
+          migrationsDone = snap.exists() ? (snap.data().applied || []) : [];
+          runSeeds();
         }, (e) => console.error(e)));
       }
       unsubs.push(onSnapshot(
@@ -998,6 +1037,8 @@ function start() {
 
   function renderAdmin() {
     renderPricesEditor();
+    renderNoticeEditor();
+    renderAnalytics();
     renderStats();
     renderPlaces();
     renderAdminOrders();
@@ -1674,19 +1715,280 @@ function start() {
       .forEach(returnStockOf);
   }
 
+  // ---------- Avisos: editar desde el panel ----------
+  let noticesDirty = false;
+  function noticeRow(n, i) {
+    return `<div class="notice-row" data-nrow>
+      <div class="nr-head">
+        <strong>Aviso ${i + 1}</strong>
+        <label class="switch"><input type="checkbox" name="active" ${n.active ? "checked" : ""} /> Encendido</label>
+        <select name="color" aria-label="Color">${Object.entries(NOTICE_COLORS).map(([k, v]) => `<option value="${k}" ${n.color === k ? "selected" : ""}>${v}</option>`).join("")}</select>
+        <button type="button" class="btn bad small" data-del-notice aria-label="Quitar aviso">✕</button>
+      </div>
+      <input name="title" maxlength="80" placeholder="Título (ej: ¡LOS PRECIOS HAN CAMBIADO!)" value="${esc(n.title || "")}" />
+      <textarea name="text" rows="2" maxlength="400" placeholder="Texto del aviso">${esc(n.text || "")}</textarea>
+      <div class="nr-preview">${noticeHtml(n)}</div>
+    </div>`;
+  }
+  function readNoticeRows() {
+    return $$("#notice-rows [data-nrow]").map((r) => ({
+      title: r.querySelector("[name=title]").value.trim().slice(0, 80),
+      text: r.querySelector("[name=text]").value.trim().slice(0, 400),
+      color: r.querySelector("[name=color]").value,
+      active: r.querySelector("[name=active]").checked,
+    }));
+  }
+  function renderNoticeEditor() {
+    if (noticesDirty) return;
+    $("#notice-rows").innerHTML = notices.length ? notices.map(noticeRow).join("")
+      : `<div class="empty">No hay avisos. Pulsa «Añadir aviso».</div>`;
+  }
+  const onNoticeEdit = (e) => {
+    noticesDirty = true;
+    const row = e.target.closest("[data-nrow]");
+    if (row) {
+      const i = $$("#notice-rows [data-nrow]").indexOf(row);
+      row.querySelector(".nr-preview").innerHTML = noticeHtml(readNoticeRows()[i]);
+    }
+  };
+  $("#admin-notices").addEventListener("input", onNoticeEdit);
+  $("#admin-notices").addEventListener("change", onNoticeEdit);
+  $("#admin-notices").addEventListener("click", (e) => {
+    if (e.target.closest("#add-notice")) {
+      const list = readNoticeRows();
+      list.push({ title: "", text: "", color: "amarillo", active: true });
+      noticesDirty = true;
+      $("#notice-rows").innerHTML = list.map(noticeRow).join("");
+      $$("#notice-rows [name=title]").at(-1).focus();
+    } else if (e.target.closest("[data-del-notice]")) {
+      e.target.closest("[data-nrow]").remove();
+      noticesDirty = true;
+    } else if (e.target.closest("#reset-notices")) {
+      noticesDirty = false;
+      renderNoticeEditor();
+    } else if (e.target.closest("#save-notices")) {
+      withBusy(e.target, async () => {
+        const items = readNoticeRows().filter((n) => n.title || n.text);
+        noticesDirty = false;
+        await setDoc(doc(db, "settings", "notices"), { items, updatedAt: serverTimestamp() });
+        toast("📢 Avisos guardados. Ya se ven en la web.");
+      });
+    }
+  });
+
+  // ---------- Analíticas ----------
+  let anRange = 30;
+  const DAY = 864e5;
+  const dayKey = (d) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+  $$(".an-filters [data-range]").forEach((b) => b.addEventListener("click", () => {
+    anRange = Number(b.dataset.range);
+    $$(".an-filters [data-range]").forEach((x) => x.classList.toggle("active", x === b));
+    renderAnalytics();
+  }));
+
+  // barras horizontales (una sola serie: sin leyenda, el título la nombra)
+  function hbars(rows, fmt) {
+    if (!rows.length) return `<div class="empty">Sin datos en este periodo.</div>`;
+    const max = Math.max(...rows.map((r) => r.v)) || 1;
+    return `<div class="hbars">${rows.map((r) => `
+      <div class="hbar" tabindex="0" data-tip="${esc(r.label)}: ${esc(fmt(r.v))}">
+        <span class="hb-label">${esc(r.label)}</span>
+        <span class="hb-track"><span class="hb-fill" style="width:${Math.max(2, (r.v / max) * 100)}%"></span></span>
+        <span class="hb-val">${esc(fmt(r.v))}</span>
+      </div>`).join("")}</div>`;
+  }
+
+  function renderAnalytics() {
+    const box = $("#an-body");
+    if (!box || myRole !== "owner") return;
+    const now = Date.now();
+    const from = anRange ? now - anRange * DAY : 0;
+    const inRange = allOrders.filter((o) => ms(o) >= from);
+    const live = inRange.filter((o) => !["cancelado", "rechazado"].includes(o.status));
+    const billable = inRange.filter((o) => BILLABLE.includes(o.status));
+    const cobrado = billable.filter((o) => o.paid).reduce((s, o) => s + orderTotal(o), 0);
+    const pendiente = billable.filter((o) => !o.paid).reduce((s, o) => s + orderTotal(o), 0);
+    const priced = billable.filter((o) => hasPrice(o));
+    const ticket = priced.length ? priced.reduce((s, o) => s + orderTotal(o), 0) / priced.length : 0;
+    const clientes = new Set(live.map((o) => o.uid)).size;
+    const cancel = inRange.length ? Math.round((inRange.filter((o) => ["cancelado", "rechazado"].includes(o.status)).length / inRange.length) * 100) : 0;
+    const nuevas = allUsers.filter((u) => (u.createdAt?.toMillis?.() ?? 0) >= from).length;
+
+    // pedidos por día (o por semana si el periodo es largo)
+    const firstMs = anRange ? from : Math.min(now, ...allOrders.map(ms));
+    const spanDays = Math.max(1, Math.ceil((now - firstMs) / DAY));
+    const weekly = spanDays > 45;
+    const buckets = [];
+    const start = new Date(firstMs); start.setHours(0, 0, 0, 0);
+    if (weekly) start.setDate(start.getDate() - ((start.getDay() + 6) % 7)); // lunes
+    for (let t = start.getTime(); t <= now; t += (weekly ? 7 : 1) * DAY) {
+      buckets.push({ t, n: 0 });
+    }
+    inRange.forEach((o) => {
+      const i = Math.floor((ms(o) - start.getTime()) / ((weekly ? 7 : 1) * DAY));
+      if (buckets[i]) buckets[i].n++;
+    });
+    const maxN = Math.max(1, ...buckets.map((b) => b.n));
+    const fmtB = (t) => {
+      const d = new Date(t);
+      const s = d.toLocaleDateString("es-ES", { day: "numeric", month: "short" });
+      return weekly ? `Semana del ${s}` : d.toLocaleDateString("es-ES", { weekday: "short", day: "numeric", month: "short" });
+    };
+    const ticks = buckets.length <= 8 ? buckets.map((_, i) => i) : [0, Math.floor(buckets.length / 2), buckets.length - 1];
+
+    // productos más pedidos (unidades, sin cancelados)
+    const units = {};
+    live.forEach((o) => Object.entries(o.items || {}).forEach(([id, q]) => { units[id] = (units[id] || 0) + (Number(q) || 0); }));
+    const topProducts = Object.entries(units).map(([id, v]) => ({ label: productOf(id)?.name || id, v }))
+      .sort((a, b) => b.v - a.v).slice(0, 8);
+
+    // mejores clientes (dinero de pedidos en marcha o entregados)
+    const spent = {};
+    billable.forEach((o) => { spent[o.userName] = (spent[o.userName] || 0) + orderTotal(o); });
+    const topClients = Object.entries(spent).map(([label, v]) => ({ label, v }))
+      .filter((r) => r.v > 0).sort((a, b) => b.v - a.v).slice(0, 5);
+
+    // estados
+    const byStatus = Object.keys(STATUS).map((k) => ({ k, n: inRange.filter((o) => o.status === k).length })).filter((x) => x.n);
+
+    box.innerHTML = `
+      <div class="stats an-tiles">
+        <div class="stat hl"><div class="n">${inRange.length}</div><div class="l">Pedidos</div></div>
+        <div class="stat"><div class="n">${money(cobrado)}</div><div class="l">Cobrado</div></div>
+        <div class="stat"><div class="n">${money(pendiente)}</div><div class="l">Pendiente de cobro</div></div>
+        <div class="stat"><div class="n">${money(ticket)}</div><div class="l">Ticket medio</div></div>
+        <div class="stat"><div class="n">${clientes}</div><div class="l">Clientes que han pedido</div></div>
+        <div class="stat"><div class="n">${cancel}%</div><div class="l">Cancelados o rechazados</div></div>
+        <div class="stat"><div class="n">${nuevas}</div><div class="l">Cuentas nuevas</div></div>
+      </div>
+
+      <div class="card an-card">
+        <h3>Pedidos por ${weekly ? "semana" : "día"}</h3>
+        ${inRange.length ? `
+        <div class="vchart" role="img" aria-label="Pedidos por ${weekly ? "semana" : "día"}">
+          <div class="vc-grid"><span>${maxN}</span><span>${Math.round(maxN / 2)}</span><span>0</span></div>
+          <div class="vc-bars">${buckets.map((b) => `
+            <div class="vc-col" tabindex="0" data-tip="${esc(fmtB(b.t))}: ${b.n} pedido${b.n === 1 ? "" : "s"}">
+              <div class="vc-bar" style="height:${b.n ? Math.max(3, (b.n / maxN) * 100) : 0}%"></div>
+            </div>`).join("")}</div>
+        </div>
+        <div class="vc-ticks">${ticks.map((i) => `<span style="left:${((i + 0.5) / buckets.length) * 100}%">${esc(new Date(buckets[i].t).toLocaleDateString("es-ES", { day: "numeric", month: "short" }))}</span>`).join("")}</div>
+        <details class="an-table"><summary>Ver en tabla</summary>
+          <table><thead><tr><th>${weekly ? "Semana" : "Día"}</th><th class="num">Pedidos</th></tr></thead>
+          <tbody>${buckets.filter((b) => b.n).map((b) => `<tr><td>${esc(fmtB(b.t))}</td><td class="num">${b.n}</td></tr>`).join("")}</tbody></table>
+        </details>` : `<div class="empty">Sin pedidos en este periodo.</div>`}
+      </div>
+
+      <div class="an-two">
+        <div class="card an-card"><h3>Productos más pedidos</h3>${hbars(topProducts, (v) => `${v} ud.`)}</div>
+        <div class="card an-card"><h3>Mejores clientes</h3>${hbars(topClients, money)}</div>
+      </div>
+
+      <div class="card an-card"><h3>Estado de los pedidos</h3>
+        ${byStatus.length ? `<div class="an-status">${byStatus.map((x) => `<span class="badge st-${x.k}">${STATUS[x.k]}: ${x.n}</span>`).join("")}</div>` : `<div class="empty">Sin pedidos en este periodo.</div>`}
+      </div>`;
+  }
+
+  // tooltip de las gráficas (ratón, dedo y teclado)
+  const tip = Object.assign(document.createElement("div"), { className: "an-tip", hidden: true });
+  document.body.appendChild(tip);
+  const showTip = (el) => {
+    tip.textContent = el.dataset.tip;
+    tip.hidden = false;
+    const r = el.getBoundingClientRect();
+    const x = Math.min(window.innerWidth - tip.offsetWidth - 8, Math.max(8, r.left + r.width / 2 - tip.offsetWidth / 2));
+    tip.style.left = `${x}px`;
+    tip.style.top = `${Math.max(8, r.top - tip.offsetHeight - 8)}px`;
+  };
+  $("#an-body").addEventListener("pointerover", (e) => { const el = e.target.closest("[data-tip]"); if (el) showTip(el); });
+  $("#an-body").addEventListener("pointerout", (e) => { if (e.target.closest("[data-tip]")) tip.hidden = true; });
+  $("#an-body").addEventListener("focusin", (e) => { const el = e.target.closest("[data-tip]"); if (el) showTip(el); });
+  $("#an-body").addEventListener("focusout", () => { tip.hidden = true; });
+  window.addEventListener("scroll", () => { tip.hidden = true; }, { passive: true });
+
   // ---------- Ban: banear y desbanear cuentas ----------
   let allBans = [];
   let allUsers = [];
-  let migrated = false;
   const isMe = (email) => (email || "").toLowerCase() === ADMIN_EMAIL.toLowerCase();
 
-  // los correos de BANNED_EMAILS (config.js) pasan solos a la lista de baneos
-  function migrateConfigBans() {
-    if (migrated) return;
-    migrated = true;
-    (BANNED_EMAILS || []).map((e) => e.toLowerCase()).filter((e) => !isMe(e) && !allBans.some((b) => b.id === e))
-      .forEach((e) => setDoc(doc(db, "bans", e), { email: e, reason: "", at: serverTimestamp() }).catch(console.error));
+  // ---------- Roles: dar y quitar rangos ----------
+  let allRoles = [];
+  let migrationsDone = null;
+  let seeding = false;
+  const ROLE_NAMES = { "": "👤 Cliente", coowner: "🤝 Co-dueño" };
+
+  // cambios de config.js (ROLE_SEEDS) que se aplican una sola vez
+  async function runSeeds() {
+    if (seeding || migrationsDone === null || !allUsers.length) return;
+    const pending = (ROLE_SEEDS || []).filter((s) => !migrationsDone.includes(s.id));
+    if (!pending.length) return;
+    seeding = true;
+    try {
+      const done = [];
+      for (const s of pending) {
+        const u = allUsers.find((x) => (x.email || "").toLowerCase() === s.email.toLowerCase());
+        if (!u) continue; // todavía no tiene cuenta: se aplicará cuando la tenga
+        const b = writeBatch(db);
+        if (s.role) b.set(doc(db, "roles", u.id), { role: s.role, email: u.email, name: u.name || "", at: serverTimestamp() });
+        if (s.unban) b.delete(doc(db, "bans", s.email.toLowerCase()));
+        await b.commit();
+        done.push(s.id);
+        toast(`${ROLE_NAMES[s.role] || ""} ${u.name || u.email}: rango devuelto.`);
+      }
+      if (done.length) await setDoc(doc(db, "settings", "migrations"), { applied: [...migrationsDone, ...done] }, { merge: true });
+    } catch (e) { console.error(e); } finally { seeding = false; }
   }
+
+  function renderRoles() {
+    const box = $("#role-list");
+    if (!box) return;
+    const q = ($("#role-search").value || "").trim().toLowerCase();
+    const list = allUsers
+      .filter((u) => !q || `${u.name} ${u.email}`.toLowerCase().includes(q))
+      .sort((a, b) => {
+        const ra = allRoles.some((r) => r.id === a.id) ? 0 : 1;
+        const rb = allRoles.some((r) => r.id === b.id) ? 0 : 1;
+        return ra - rb || (a.name || "").localeCompare(b.name || "");
+      });
+    box.innerHTML = list.length ? list.map((u) => {
+      const role = allRoles.find((r) => r.id === u.id)?.role || "";
+      const banned = allBans.some((b) => b.id === (u.email || "").toLowerCase());
+      return `<div class="ban-row">
+        <div class="ban-main"><strong>${esc(u.name)}</strong>
+          ${role ? `<span class="role ${role}">${ROLE_NAMES[role]}</span>` : ""}
+          ${banned ? `<span class="badge owes">Baneado</span>` : ""}
+          <div class="muted small">${esc(u.email)}</div></div>
+        ${isMe(u.email) ? `<span class="role owner">👑 Dueño</span>`
+          : `<select data-role-uid="${esc(u.id)}" aria-label="Rango de ${esc(u.name)}">
+              ${Object.entries(ROLE_NAMES).map(([k, v]) => `<option value="${k}" ${k === role ? "selected" : ""}>${v}</option>`).join("")}
+            </select>`}
+      </div>`;
+    }).join("") : `<div class="empty">No hay cuentas.</div>`;
+  }
+  $("#role-search").addEventListener("input", renderRoles);
+  $("#role-list").addEventListener("change", (e) => {
+    const sel = e.target.closest("[data-role-uid]");
+    if (!sel) return;
+    const u = allUsers.find((x) => x.id === sel.dataset.roleUid);
+    const role = sel.value;
+    const prev = allRoles.find((r) => r.id === u.id)?.role || "";
+    const msg = role
+      ? `¿Dar el rango ${ROLE_NAMES[role]} a ${u.name}? Le llegará un enlace a su correo al entrar para activarlo.`
+      : `¿Quitarle el rango a ${u.name}?`;
+    if (!confirm(msg)) { sel.value = prev; return; }
+    withBusy(sel, async () => {
+      if (role) {
+        const b = writeBatch(db);
+        b.set(doc(db, "roles", u.id), { role, email: u.email, name: u.name || "", at: serverTimestamp() });
+        b.delete(doc(db, "bans", (u.email || "").toLowerCase())); // con rango no puede estar baneado
+        await b.commit();
+        toast(`${ROLE_NAMES[role]} dado a ${u.name}. 📧 Le llegará el enlace al entrar.`);
+      } else {
+        await deleteDoc(doc(db, "roles", u.id));
+        toast(`Rango quitado a ${u.name}.`);
+      }
+    });
+  });
 
   async function banEmail(email, reason = "") {
     const e = email.trim().toLowerCase();
