@@ -685,6 +685,8 @@ function start() {
         // 2) restar el stock y crear el pedido a la vez
         Object.entries(fromStock).forEach(([id, q]) => {
           tx.update(doc(db, "stock", id), { qty: increment(-q), lastOrder: orderRef.id });
+          // reserva: prueba de lo que este pedido ha sacado del stock
+          tx.set(doc(db, "stock", id, "holds", orderRef.id), { uid: currentUser.uid, qty: q });
         });
         tx.set(orderRef, {
         uid: currentUser.uid,
@@ -831,7 +833,17 @@ function start() {
     const id = e.target.closest("[data-cancel]")?.dataset.cancel;
     if (!id || !confirm("¿Seguro que quieres cancelar este pedido?")) return;
     withBusy(e.target, async () => {
-      await updateDoc(doc(db, "orders", id), { status: "cancelado" });
+      const o = myOrders.find((x) => x.id === id);
+      await runTransaction(db, async (tx) => {
+        const ids = Object.keys(o?.fromStock || {});
+        const holds = await Promise.all(ids.map((pid) => tx.get(doc(db, "stock", pid, "holds", id))));
+        holds.forEach((h, i) => {
+          if (!h.exists()) return;
+          tx.update(doc(db, "stock", ids[i]), { qty: increment(Number(h.data().qty) || 0), lastOrder: id });
+          tx.delete(h.ref);
+        });
+        tx.update(doc(db, "orders", id), { status: "cancelado", ...(ids.length && { stockReturned: true }) });
+      });
       toast("Pedido cancelado.");
     });
   });
@@ -1043,7 +1055,11 @@ function start() {
                 const id = Object.keys(o.fromStock)[i];
                 if (s.exists() && (Number(s.data().qty) || 0) < o.fromStock[id]) throw new Error(`No queda stock de ${productOf(id)?.name || id}.`);
               });
-              Object.entries(o.fromStock).forEach(([id, q]) => tx.set(doc(db, "stock", id), { qty: increment(-q) }, { merge: true }));
+              Object.entries(o.fromStock).forEach(([id, q]) => {
+                if (!snaps[Object.keys(o.fromStock).indexOf(id)].exists()) return;
+                tx.set(doc(db, "stock", id), { qty: increment(-q) }, { merge: true });
+                tx.set(doc(db, "stock", id, "holds", o.id), { uid: o.uid, qty: q });
+              });
               tx.update(ref, { status: "aceptado", stockReturned: false });
             });
           } else {
@@ -1501,8 +1517,12 @@ function start() {
         const ref = doc(db, "orders", o.id);
         const cur = await tx.get(ref);
         if (!cur.exists() || cur.data().stockReturned || !cur.data().fromStock) return;
-        Object.entries(cur.data().fromStock).forEach(([id, q]) => {
-          tx.set(doc(db, "stock", id), { qty: increment(Number(q) || 0) }, { merge: true });
+        const ids = Object.keys(cur.data().fromStock);
+        const holds = await Promise.all(ids.map((pid) => tx.get(doc(db, "stock", pid, "holds", o.id))));
+        holds.forEach((h, i) => {
+          if (!h.exists()) return;
+          tx.set(doc(db, "stock", ids[i]), { qty: increment(Number(h.data().qty) || 0) }, { merge: true });
+          tx.delete(h.ref);
         });
         tx.update(ref, { stockReturned: true });
       });

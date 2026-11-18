@@ -63,19 +63,54 @@ service cloud.firestore {
     }
 
     // ---------- Stock de cada producto ----------
-    // Lo ven todos. El equipo lo cambia como quiera. Un amigo solo puede
-    // restar exactamente lo que se lleva en el pedido que crea a la vez.
+    // Lo ven todos. El equipo lo cambia como quiera.
+    // Un amigo solo puede: restar lo que se lleva en un pedido nuevo (dejando una
+    // reserva en holds/{pedido}) o devolver exactamente esa reserva al cancelarlo.
     match /stock/{pid} {
+      function holdPath(orderId) {
+        return /databases/$(database)/documents/stock/$(pid)/holds/$(orderId);
+      }
+      function orderPath(orderId) {
+        return /databases/$(database)/documents/orders/$(orderId);
+      }
+
       allow read: if true;
       allow write: if isStaff();
       allow update: if signedIn()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['qty', 'lastOrder'])
-        && !exists(/databases/$(database)/documents/orders/$(request.resource.data.lastOrder))
-        && getAfter(/databases/$(database)/documents/orders/$(request.resource.data.lastOrder)).data.uid == request.auth.uid
         && request.resource.data.qty is int
         && request.resource.data.qty >= 0
-        && request.resource.data.qty == resource.data.qty
-             - getAfter(/databases/$(database)/documents/orders/$(request.resource.data.lastOrder)).data.fromStock[pid];
+        && (
+          // coger stock para un pedido nuevo
+          (!exists(orderPath(request.resource.data.lastOrder))
+            && getAfter(orderPath(request.resource.data.lastOrder)).data.uid == request.auth.uid
+            && request.resource.data.qty == resource.data.qty
+                 - getAfter(holdPath(request.resource.data.lastOrder)).data.qty)
+          // devolverlo al cancelar (la reserva desaparece a la vez)
+          || (exists(holdPath(request.resource.data.lastOrder))
+            && !existsAfter(holdPath(request.resource.data.lastOrder))
+            && get(holdPath(request.resource.data.lastOrder)).data.uid == request.auth.uid
+            && request.resource.data.qty == resource.data.qty
+                 + get(holdPath(request.resource.data.lastOrder)).data.qty)
+        );
+
+      // Reservas: cuánto stock ha sacado cada pedido
+      match /holds/{orderId} {
+        allow read: if isStaff() || (signedIn() && resource.data.uid == request.auth.uid);
+        allow write: if isStaff();
+        allow create: if signedIn()
+          && request.resource.data.keys().hasOnly(['uid', 'qty'])
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.qty is int
+          && request.resource.data.qty > 0
+          && !exists(orderPath(orderId))
+          && getAfter(orderPath(orderId)).data.uid == request.auth.uid
+          && getAfter(/databases/$(database)/documents/stock/$(pid)).data.lastOrder == orderId;
+        allow delete: if signedIn()
+          && resource.data.uid == request.auth.uid
+          && getAfter(orderPath(orderId)).data.status == 'cancelado'
+          && getAfter(/databases/$(database)/documents/stock/$(pid)).data.lastOrder == orderId;
+      }
     }
 
     // ---------- Chat de cada amigo con el vendedor ----------
@@ -158,7 +193,7 @@ service cloud.firestore {
             && resource.data.uid == request.auth.uid
             && resource.data.status in ['pendiente', 'aceptado']
             && resource.data.paid == false
-            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'stockReturned'])
             && request.resource.data.status == 'cancelado');
 
       allow delete: if isOwner();
