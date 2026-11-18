@@ -196,6 +196,21 @@ service cloud.firestore {
       }
     }
 
+    // ---------- Entradas y recargas (para analíticas) ----------
+    match /visits/{id} {
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['uid', 'name', 'email', 'kind', 'reason', 'device', 'at'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.kind in ['entrada', 'manual', 'auto', 'memoria', 'error']
+        && shortString(request.resource.data.name, 0, 60)
+        && shortString(request.resource.data.reason, 0, 200)
+        && shortString(request.resource.data.device, 0, 120)
+        && request.resource.data.at == request.time;
+      allow read: if can('stats');
+      allow delete: if isOwner();
+    }
+
     // ---------- Pedidos ----------
     match /orders/{orderId} {
       allow read: if can('orders') || can('stats') || can('money')
