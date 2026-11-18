@@ -474,6 +474,55 @@ function start() {
     show($("#codes-tab"), false);
   }
 
+  // ---------- Ventana de entrar (para quien mira sin cuenta) ----------
+  let pendingIntent = null;
+  function openLogin(why, tab = "register") {
+    $("#auth-why").textContent = why || "👋 Entra o crea tu cuenta";
+    $(`[data-auth-tab="${tab}"]`).click();
+    show($("#auth-view"));
+    document.body.classList.add("modal-open");
+    setTimeout(() => $(tab === "login" ? "#login-form [name=email]" : "#register-form [name=username]")?.focus(), 50);
+  }
+  function closeLogin() {
+    show($("#auth-view"), false);
+    document.body.classList.remove("modal-open");
+  }
+  $("#nav-login").addEventListener("click", () => { pendingIntent = null; openLogin("👋 Entra o crea tu cuenta", "login"); });
+  $("#auth-close").addEventListener("click", () => { pendingIntent = null; closeLogin(); });
+  $("#auth-view").addEventListener("click", (e) => { if (e.target.id === "auth-view") { pendingIntent = null; closeLogin(); } });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !$("#auth-view").classList.contains("hidden")) { pendingIntent = null; closeLogin(); }
+  });
+
+  // Sin cuenta, cualquier intento de pedir abre la ventana de entrar
+  const WANTS = "#products [data-step], #products [data-qty], #offers [data-offer], #order-form input, #order-form textarea, #order-form select, #order-form label, #order-form button";
+  function guard(e) {
+    if (currentUser || !$("#auth-view").classList.contains("hidden")) return;
+    const el = e.target.closest?.(WANTS);
+    if (!el || !$("#client-view").contains(el)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    el.blur?.();
+    if (el.matches("[data-step]") && el.dataset.step === "1") pendingIntent = { type: "step", pid: el.dataset.pid };
+    else if (el.matches("[data-offer]")) pendingIntent = { type: "offer", id: el.dataset.offer };
+    else pendingIntent = null;
+    openLogin("🛒 Para pedir necesitas una cuenta. Es gratis y se tarda un minuto.");
+  }
+  document.addEventListener("click", guard, true);
+  document.addEventListener("focusin", guard, true);
+
+  // al entrar, se hace lo que había pulsado
+  function replayIntent() {
+    const it = pendingIntent;
+    pendingIntent = null;
+    if (!it) return;
+    setTimeout(() => {
+      if (it.type === "step") $(`#products [data-step="1"][data-pid="${CSS.escape(it.pid)}"]`)?.click();
+      if (it.type === "offer") $(`#offers [data-offer="${CSS.escape(it.id)}"]`)?.click();
+      $("#order-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 300);
+  }
+
   // ---------- Login / registro ----------
   $$("[data-auth-tab]").forEach((b) => b.addEventListener("click", () => {
     $$("[data-auth-tab]").forEach((x) => x.classList.toggle("active", x === b));
@@ -665,17 +714,24 @@ function start() {
     show($("#loading"), false);
 
     if (!user) {
+      // Sin cuenta: puede ver la tienda; al intentar pedir se le pide entrar
       $("#login-form").reset();
       $("#register-form").reset();
-      $('[data-auth-tab="login"]').click();
-      show($("#auth-view"));
-      show($("#nav"), false);
-      show($("#client-view"), false);
-      show($("#admin-view"), false);
+      isAdmin = false;
+      myRole = null;
+      document.body.classList.add("guest");
+      document.body.classList.remove("coowner");
+      show($("#nav"));
+      ["#nav-client", "#nav-chat", "#nav-admin", "#nav-user", "#logout", "#verify-banner"].forEach((s) => show($(s), false));
+      show($("#nav-login"));
+      setView("client");
       return;
     }
 
-    show($("#auth-view"), false);
+    document.body.classList.remove("guest");
+    closeLogin();
+    show($("#nav-login"), false);
+    ["#nav-user", "#logout"].forEach((s) => show($(s)));
     show($("#nav"));
 
     // ¿Está baneado? (se gestiona en el panel → Ban)
@@ -822,6 +878,7 @@ function start() {
         if (currentView === "chat") markRead();
       }, (e) => console.error(e)));
       setView("client");
+      replayIntent();
     }
   });
 

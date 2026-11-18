@@ -16,6 +16,7 @@
       <button id="nav-admin" class="btn ghost small hidden">Panel admin</button>
       <span id="nav-user" class="nav-user"></span>
       <button id="logout" class="btn ghost small">Salir</button>
+      <button id="nav-login" class="btn small nav-login hidden">👤 Entrar / Crear cuenta</button>
     </nav>
   </header>
 
@@ -30,15 +31,12 @@
     <div id="loading" class="loading">Cargando…</div>
 
     <!-- ============ LOGIN / REGISTRO ============ -->
-    <section id="auth-view" class="auth hidden">
-      <div class="hero">
-        <h1>Pide tus figuras en 3D</h1>
-        <p>Crea tu cuenta, escribe lo que quieres y te digo precio, hora y sitio para recogerlo.</p>
-        <p class="cash">💶 Solo pago en efectivo al recoger</p>
-        <div class="notices" role="region" aria-label="Avisos"></div>
-      </div>
-
+    <section id="auth-view" class="auth-modal hidden" role="dialog" aria-modal="true" aria-labelledby="auth-why">
       <div class="card auth-card">
+        <div class="auth-top">
+          <p id="auth-why" class="auth-why">👋 Entra o crea tu cuenta</p>
+          <button type="button" id="auth-close" class="btn ghost small" aria-label="Cerrar">✕</button>
+        </div>
         <div class="tabs">
           <button class="tab active" data-auth-tab="login">Entrar</button>
           <button class="tab" data-auth-tab="register">Crear cuenta</button>
@@ -87,6 +85,11 @@
 
     <!-- ============ VISTA DE AMIGO ============ -->
     <section id="client-view" class="hidden">
+      <div id="guest-hero" class="hero hidden">
+        <h1>Pide tus figuras en 3D</h1>
+        <p>Mira los productos y, cuando quieras pedir, crea tu cuenta en un minuto.</p>
+        <p class="cash">💶 Solo pago en efectivo al recoger</p>
+      </div>
       <div class="notices" role="region" aria-label="Avisos"></div>
 
       <div id="verify-banner" class="card warn hidden">
@@ -137,8 +140,10 @@
         </form>
       </div>
 
-      <h2 class="section-title">📦 Mis pedidos</h2>
-      <div id="my-orders" class="list"></div>
+      <div id="my-orders-wrap">
+        <h2 class="section-title">📦 Mis pedidos</h2>
+        <div id="my-orders" class="list"></div>
+      </div>
     </section>
 
     <!-- ============ CHAT CON EL VENDEDOR ============ -->
