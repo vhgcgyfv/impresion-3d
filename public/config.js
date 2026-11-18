@@ -20,6 +20,15 @@ export const SITE_NAME = "Impresión 3D";
 //    OJO: si lo cambias, cámbialo también en firestore.rules
 export const ADMIN_EMAIL = "o39459309@gmail.com";
 
+// 3b) Envío del código de verificación al crear cuenta (EmailJS, gratis).
+//     Mientras esté vacío, en vez de un código se manda un enlace de verificación.
+//     Pasos en el README → "Código de verificación por correo".
+export const EMAILJS = {
+  serviceId: "",   // p. ej. "service_abc123"
+  templateId: "",  // p. ej. "template_xyz789"
+  publicKey: "",   // Account → General → Public Key
+};
+
 // 4) Suplemento por versión llavero (en euros, por pedido)
 export const KEYCHAIN_EXTRA = 0.10;
 

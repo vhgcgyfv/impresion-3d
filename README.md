@@ -2,7 +2,7 @@
 
 Web para que tus amigos te pidan impresiones 3D:
 
-- **Cuentas**: cada amigo crea su cuenta (correo + contraseña o Google).
+- **Cuentas**: para crear cuenta hace falta **usuario + correo + código de verificación + contraseña**. El código de 6 cifras llega al correo. No se pueden repetir usuarios.
 - **Pedidos**: eligen productos con precio fijo (**Fennec 0,50 €**, **Balón 0,25 €**), escriben detalles en un cuadro de texto, pueden elegir una **oferta**, la **versión llavero (+0,10 €)** y un **código de apoyo**. Ven el total aproximado al momento.
 - **Código `manchis14`**: al escribirlo sale una sorpresa de 5 segundos 🎵 y luego se aplica un **10 % de descuento**.
 - **Solo pago en efectivo.**
@@ -11,6 +11,7 @@ Web para que tus amigos te pidan impresiones 3D:
   - Marcar pedidos como *listo* / *entregado*.
   - **Cuentas**: quién te ha pagado y quién te debe (y cuánto), con un botón para marcar pagado.
   - **Códigos**: cuánta gente ha usado `manchis14`.
+  - **Sin filamento**: un botón que cancela de golpe todos los pedidos pendientes y aceptados que aún no has marcado como listos (tus amigos ven el aviso).
   - **Precios**: cambia el precio de cada producto y del llavero, añade o quita productos. Tus amigos ven los precios nuevos al momento.
 - Ofertas incluidas: **2 Fennecs + balón GRATIS**.
 
@@ -24,7 +25,6 @@ Funciona con **Firebase** (cuentas y base de datos, gratis) y se publica en **Gi
 1. Entra en <https://console.firebase.google.com> con tu cuenta de Google → **Agregar proyecto** (Google Analytics no hace falta).
 2. **Authentication** → *Comenzar* → pestaña **Método de acceso** → activa:
    - **Correo electrónico/contraseña**
-   - **Google**
 3. **Firestore Database** → *Crear base de datos* → elige una ubicación en Europa (p. ej. `eur3`) → modo **producción**.
 4. En Firestore → pestaña **Reglas** → borra lo que haya, pega **todo** el contenido del archivo [`firestore.rules`](firestore.rules) y pulsa **Publicar**. *(Esto es lo que impide que alguien que no seas tú cambie precios o pagos.)*
 
@@ -38,9 +38,24 @@ Funciona con **Firebase** (cuentas y base de datos, gratis) y se publica en **Gi
 3. Ve a la pestaña **Actions**: en un minuto la web estará en `https://<tu-usuario>.github.io/impresion-3d/`.
 4. Vuelve a Firebase → **Authentication** → **Settings** → **Dominios autorizados** → *Agregar dominio* → `<tu-usuario>.github.io`.
 
-### 4. Activa tu cuenta de admin (¡hazlo antes que nadie!)
-- Entra en la web con **“Entrar con Google”** usando `o39459309@gmail.com` → ya verás el **Panel admin**.
-- Si prefieres correo + contraseña: crea la cuenta con ese correo, abre el enlace de verificación que te llega al Gmail y vuelve a entrar.
+### 4. Activa los códigos de verificación (EmailJS, gratis)
+Firebase solo sabe mandar enlaces, así que los códigos de 6 cifras se envían con **EmailJS** (gratis hasta 200 correos al mes, sin tarjeta).
+**Mientras no hagas este paso, la web funciona igual pero manda un enlace de verificación en vez de un código.**
+
+1. Crea una cuenta en <https://www.emailjs.com>.
+2. **Email Services** → *Add New Service* → **Gmail** → conecta tu Gmail → apunta el **Service ID**.
+3. **Email Templates** → *Create New Template*:
+   - **To Email**: `{{to_email}}`
+   - **Subject**: `Tu código: {{code}}`
+   - **Content**: `Hola {{username}}, tu código para crear la cuenta en {{site_name}} es: {{code}}. Caduca en 10 minutos.`
+   - Guarda y apunta el **Template ID**.
+4. **Account** → **General** → apunta la **Public Key**.
+5. Pon los tres valores en `EMAILJS` dentro de [`public/config.js`](public/config.js).
+
+### 5. Activa tu cuenta de admin (¡hazlo antes que nadie!)
+1. En la web → **Crear cuenta** con `o39459309@gmail.com` (usuario, código y contraseña como todos).
+2. Además te llega un **enlace de verificación de Firebase** a ese Gmail: ábrelo (mira en spam).
+3. Sal y vuelve a entrar → ya verás el **Panel admin**.
 
 > El admin se reconoce por el correo **verificado**, así que nadie puede hacerse pasar por ti aunque intente registrarse con tu correo.
 

@@ -25,9 +25,22 @@ service cloud.firestore {
       allow read: if isAdmin() || (signedIn() && request.auth.uid == uid);
       allow create, update: if signedIn()
         && request.auth.uid == uid
-        && request.resource.data.keys().hasOnly(['name', 'email', 'createdAt'])
+        && request.resource.data.keys().hasOnly(['name', 'username', 'email', 'createdAt'])
         && shortString(request.resource.data.name, 1, 60)
-        && request.resource.data.email == request.auth.token.email;
+        && request.resource.data.email == request.auth.token.email
+        // el usuario tiene que ser suyo de verdad (reservado en /usernames)
+        && (!('username' in request.resource.data)
+            || getAfter(/databases/$(database)/documents/usernames/$(request.resource.data.username)).data.uid == request.auth.uid);
+      allow delete: if isAdmin();
+    }
+
+    // ---------- Nombres de usuario (para que no se repitan) ----------
+    match /usernames/{name} {
+      allow get: if true;
+      allow create: if signedIn()
+        && name.matches('^[a-z0-9_.]{3,20}$')
+        && request.resource.data.keys().hasOnly(['uid'])
+        && request.resource.data.uid == request.auth.uid;
       allow delete: if isAdmin();
     }
 

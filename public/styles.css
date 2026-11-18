@@ -217,3 +217,10 @@ td.num, th.num { text-align: right; }
 .euro { display: inline-flex; align-items: center; gap: 4px; font-weight: 600; flex: none; }
 .euro input { width: 84px; }
 .keychain-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin: 14px 0 4px; font-weight: 600; flex-wrap: wrap; }
+
+/* ---------- Registro con código ---------- */
+.code-input { font-size: 1.6rem; letter-spacing: .4em; text-align: center; font-weight: 800; }
+
+/* ---------- Sin filamento ---------- */
+.filament { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; border-color: var(--bad); }
+.filament > div { flex: 1 1 240px; }

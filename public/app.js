@@ -1,15 +1,15 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
   getAuth, connectAuthEmulator, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword,
-  signInWithPopup, GoogleAuthProvider, signOut, sendEmailVerification, sendPasswordResetEmail,
+  signOut, sendEmailVerification, sendPasswordResetEmail,
   updateProfile,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
-  getFirestore, connectFirestoreEmulator, collection, addDoc, doc, setDoc, getDoc, updateDoc, deleteDoc,
+  getFirestore, connectFirestoreEmulator, collection, addDoc, doc, setDoc, getDoc, updateDoc, deleteDoc, writeBatch,
   query, where, orderBy, onSnapshot, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {
-  firebaseConfig, SITE_NAME, ADMIN_EMAIL, KEYCHAIN_EXTRA, PRODUCTS, PROMO_CODES, OFFERS, PICKUP_PLACES,
+  firebaseConfig, SITE_NAME, EMAILJS, ADMIN_EMAIL, KEYCHAIN_EXTRA, PRODUCTS, PROMO_CODES, OFFERS, PICKUP_PLACES,
 } from "./config.js";
 
 // ---------------------------------------------------------------- utilidades
@@ -101,6 +101,8 @@ const STATUS = {
   cancelado: "🚫 Cancelado",
 };
 const BILLABLE = ["aceptado", "listo", "entregado"];
+const CODES_ON = Boolean(EMAILJS?.serviceId && EMAILJS?.templateId && EMAILJS?.publicKey);
+const USERNAME_RE = /^[A-Za-z0-9_.]{3,20}$/;
 
 let toastTimer;
 function toast(msg, isError = false) {
@@ -120,9 +122,9 @@ function authError(e) {
     "auth/email-already-in-use": "Ya hay una cuenta con ese correo. Prueba a entrar.",
     "auth/weak-password": "La contraseña debe tener al menos 6 caracteres.",
     "auth/invalid-email": "El correo no es válido.",
-    "auth/popup-closed-by-user": "Has cerrado la ventana de Google.",
     "auth/too-many-requests": "Demasiados intentos. Espera un poco.",
     "auth/unauthorized-domain": "Este dominio no está autorizado en Firebase (mira el README).",
+    "auth/requires-recent-login": "Vuelve a entrar e inténtalo otra vez.",
     "permission-denied": "No tienes permiso para hacer eso.",
   };
   console.error(e);
@@ -282,6 +284,8 @@ function start() {
     $$("[data-auth-tab]").forEach((x) => x.classList.toggle("active", x === b));
     show($("#login-form"), b.dataset.authTab === "login");
     show($("#register-form"), b.dataset.authTab === "register");
+    show($("#code-form"), false);
+    pending = null;
   }));
 
   $("#login-form").addEventListener("submit", (e) => {
@@ -291,22 +295,116 @@ function start() {
       signInWithEmailAndPassword(auth, f.email.value.trim(), f.password.value));
   });
 
+  // ---------- Crear cuenta: usuario + correo + contraseña + código ----------
+  let pending = null;   // datos del registro mientras se espera el código
+  let registering = false;
+  let lastSent = 0;
+  if (!CODES_ON) $("#register-submit").textContent = "Crear cuenta";
+
+  function showRegisterStep(step) {
+    show($("#register-form"), step === "data");
+    show($("#code-form"), step === "code");
+  }
+
+  async function sendCode(p) {
+    const wait = Math.ceil((lastSent + 30e3 - Date.now()) / 1000);
+    if (wait > 0) throw new Error(`Espera ${wait} s para pedir otro código.`);
+    p.code = String(crypto.getRandomValues(new Uint32Array(1))[0] % 1e6).padStart(6, "0");
+    p.expires = Date.now() + 10 * 60e3;
+    p.tries = 0;
+    const r = await fetch("https://api.emailjs.com/api/v1.0/email/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        service_id: EMAILJS.serviceId,
+        template_id: EMAILJS.templateId,
+        user_id: EMAILJS.publicKey,
+        template_params: { to_email: p.email, code: p.code, username: p.username, site_name: SITE_NAME },
+      }),
+    });
+    if (!r.ok) throw new Error("No se ha podido enviar el código. Revisa el correo o inténtalo más tarde.");
+    lastSent = Date.now();
+  }
+
+  async function createAccount(p) {
+    const key = p.username.toLowerCase();
+    registering = true;
+    profileName = p.username;
+    try {
+      const cred = await createUserWithEmailAndPassword(auth, p.email, p.password);
+      try {
+        const b = writeBatch(db);
+        b.set(doc(db, "usernames", key), { uid: cred.user.uid });
+        b.set(doc(db, "users", cred.user.uid), {
+          name: p.username, username: key, email: cred.user.email, createdAt: serverTimestamp(),
+        });
+        await b.commit();
+      } catch (e) {
+        // Alguien cogió el usuario justo a la vez: deshacer la cuenta
+        await cred.user.delete().catch(() => {});
+        throw Object.assign(new Error("Ese usuario ya está cogido. Elige otro."), { code: "" });
+      }
+      await updateProfile(cred.user, { displayName: p.username });
+      // Firebase solo marca el correo como verificado con su enlace: hace falta
+      // para el admin siempre, y para todos si no hay códigos configurados.
+      if (!CODES_ON || cred.user.email.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
+        await sendEmailVerification(cred.user);
+      }
+      renderHeader();
+      toast(`¡Bienvenido, ${p.username}!`);
+    } finally {
+      registering = false;
+    }
+  }
+
   $("#register-form").addEventListener("submit", (e) => {
     e.preventDefault();
     const f = e.target;
     withBusy(f.querySelector("button[type=submit]"), async () => {
-      const name = f.name.value.trim();
-      profileName = name;
-      const cred = await createUserWithEmailAndPassword(auth, f.email.value.trim(), f.password.value);
-      await updateProfile(cred.user, { displayName: name });
-      await ensureProfile(cred.user, name);
-      if (cred.user.email.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
-        await sendEmailVerification(cred.user);
-      }
-      renderHeader();
-      toast(`¡Bienvenido, ${name}!`);
+      const username = f.username.value.trim();
+      const email = f.email.value.trim();
+      if (!USERNAME_RE.test(username)) throw new Error("El usuario solo puede tener letras, números, punto o _ (3-20).");
+      if (f.password.value.length < 6) throw new Error("La contraseña debe tener al menos 6 caracteres.");
+      if (f.password.value !== f.password2.value) throw new Error("Las contraseñas no coinciden.");
+      const taken = await getDoc(doc(db, "usernames", username.toLowerCase()));
+      if (taken.exists()) throw new Error("Ese usuario ya está cogido. Elige otro.");
+      const p = { username, email, password: f.password.value };
+      if (!CODES_ON) return createAccount(p);
+      await sendCode(p);
+      pending = p;
+      $("#code-email").textContent = email;
+      $("#code-form").reset();
+      showRegisterStep("code");
+      $("#code-form [name=code]").focus();
+      toast("📧 Código enviado.");
     });
   });
+
+  $("#code-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const f = e.target;
+    withBusy(f.querySelector("button[type=submit]"), async () => {
+      if (!pending) return showRegisterStep("data");
+      if (Date.now() > pending.expires) throw new Error("El código ha caducado. Pulsa «Reenviar código».");
+      if (pending.tries >= 5) throw new Error("Demasiados intentos. Pulsa «Reenviar código».");
+      if (f.code.value.trim() !== pending.code) {
+        pending.tries++;
+        throw new Error(`Código incorrecto. Te quedan ${5 - pending.tries} intentos.`);
+      }
+      const p = pending;
+      await createAccount(p);
+      pending = null;
+      $("#register-form").reset();
+      showRegisterStep("data");
+    });
+  });
+
+  $("#resend-code").addEventListener("click", (e) => withBusy(e.currentTarget, async () => {
+    if (!pending) return showRegisterStep("data");
+    await sendCode(pending);
+    toast("📧 Código reenviado.");
+  }));
+  $("#back-register").addEventListener("click", () => { pending = null; showRegisterStep("data"); });
 
   $("#forgot").addEventListener("click", () => {
     const email = $("#login-form").email.value.trim() || prompt("Escribe tu correo:");
@@ -314,13 +412,6 @@ function start() {
     withBusy(null, async () => {
       await sendPasswordResetEmail(auth, email);
       toast("Te hemos enviado un correo para cambiar la contraseña.");
-    });
-  });
-
-  $("#google-login").addEventListener("click", (e) => {
-    withBusy(e.currentTarget, async () => {
-      const cred = await signInWithPopup(auth, new GoogleAuthProvider());
-      await ensureProfile(cred.user, cred.user.displayName || cred.user.email.split("@")[0]);
     });
   });
 
@@ -375,10 +466,13 @@ function start() {
 
     const emailIsAdmin = user.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
     isAdmin = emailIsAdmin && user.emailVerified;
-    show($("#verify-banner"), emailIsAdmin && !user.emailVerified);
+    show($("#verify-banner"), (emailIsAdmin || !CODES_ON) && !user.emailVerified);
+    $("#verify-why").textContent = emailIsAdmin ? "para activar el panel de administrador" : "para poder hacer pedidos";
     show($("#nav-admin"), isAdmin);
 
-    try {
+    if (registering) {
+      // createAccount se encarga del perfil
+    } else try {
       const snap = await getDoc(doc(db, "users", user.uid));
       profileName = snap.exists() ? snap.data().name : (user.displayName || profileName);
       if (!snap.exists()) await ensureProfile(user, profileName || user.email.split("@")[0]);
@@ -420,6 +514,9 @@ function start() {
     const description = f.description.value.trim();
     const promoCode = f.promoCode.value.trim().toLowerCase();
     const items = getItems();
+    if (!CODES_ON && !currentUser.emailVerified) {
+      return toast("Primero verifica tu correo con el enlace que te hemos enviado.", true);
+    }
     if (!description && !Object.keys(items).length) {
       return toast("Elige algún producto o escribe qué quieres pedir.", true);
     }
@@ -764,6 +861,29 @@ function start() {
     withBusy(e.target, async () => {
       await updateDoc(doc(db, "orders", id), { paid: true, paidAt: serverTimestamp() });
       toast(`💶 ${o.userName} ha pagado ${money(o.total)}.`);
+    });
+  });
+
+  // ---------- Sin filamento: cancelar todo lo que no está hecho ----------
+  $("#no-filament").addEventListener("click", (e) => {
+    const targets = allOrders.filter((o) => ["pendiente", "aceptado"].includes(o.status));
+    if (!targets.length) return toast("No hay pedidos sin hacer que cancelar.");
+    const paid = targets.filter((o) => o.paid);
+    const msg = `¿Cancelar ${targets.length} pedido${targets.length === 1 ? "" : "s"} sin hacer (pendientes y aceptados)?` +
+      (paid.length ? `\n\n⚠️ ${paid.length} ya estaba${paid.length === 1 ? "" : "n"} pagado${paid.length === 1 ? "" : "s"}: tendrás que devolver el dinero.` : "") +
+      "\n\nLos pedidos marcados como listos o entregados no se tocan.";
+    if (!confirm(msg)) return;
+    withBusy(e.currentTarget, async () => {
+      for (let i = 0; i < targets.length; i += 400) {
+        const b = writeBatch(db);
+        targets.slice(i, i + 400).forEach((o) => b.update(doc(db, "orders", o.id), {
+          status: "cancelado",
+          adminNote: "Me he quedado sin filamento 😢 Vuelve a pedirlo más adelante.",
+          cancelledAt: serverTimestamp(),
+        }));
+        await b.commit();
+      }
+      toast(`🧵 ${targets.length} pedido${targets.length === 1 ? "" : "s"} cancelado${targets.length === 1 ? "" : "s"}.`);
     });
   });
 
