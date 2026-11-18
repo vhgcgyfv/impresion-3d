@@ -83,6 +83,14 @@ service cloud.firestore {
             && request.resource.data.status == 'cancelado');
 
       allow delete: if isAdmin();
+
+      // Novedades del pedido (cómo va + fotos): solo el admin publica,
+      // y solo el dueño del pedido las puede ver
+      match /updates/{updateId} {
+        allow read: if isAdmin()
+          || (signedIn() && resource.data.uid == request.auth.uid);
+        allow write: if isAdmin();
+      }
     }
   }
 }
