@@ -130,25 +130,95 @@ function updatesHtml(list, { admin = false, orderId = "" } = {}) {
 }
 
 // ---------------------------------------------------------------- rickroll
+// Carga la API oficial de YouTube una sola vez
+let ytApi = null;
+function loadYouTubeApi() {
+  if (window.YT?.Player) return Promise.resolve(window.YT);
+  ytApi ||= new Promise((resolve, reject) => {
+    const prev = window.onYouTubeIframeAPIReady;
+    window.onYouTubeIframeAPIReady = () => { prev?.(); resolve(window.YT); };
+    const s = document.createElement("script");
+    s.src = "https://www.youtube.com/iframe_api";
+    s.onerror = () => { ytApi = null; reject(new Error("YouTube no carga")); };
+    document.head.appendChild(s);
+  });
+  return ytApi;
+}
+
+const RICK_ID = "dQw4w9WgXcQ";
+const RICK_START = 43;    // segundo donde empieza el estribillo
+const RICK_SECONDS = 5;   // cuánto suena
+const RICK_MAX_WAIT = 30; // si no llega a sonar (anuncio largo, sin red…), se aplica igual
+
 function rickroll(onDone) {
   const ov = $("#rick");
   const frame = $("#rick-frame");
   const count = $("#rick-count");
-  frame.innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?autoplay=1&controls=0&modestbranding=1&rel=0"
-    allow="autoplay; encrypted-media" title="Sorpresa" frameborder="0"></iframe>`;
+  const msg = $("#rick-msg");
+  const hint = $("#rick-hint");
+  frame.innerHTML = `<div id="rick-player"></div>`;
+  msg.textContent = "Cargando tu descuento…";
+  show(hint, false);
   show(ov);
-  let left = 5;
-  count.textContent = left;
-  const t = setInterval(() => {
-    left--;
-    count.textContent = left;
-    if (left <= 0) {
-      clearInterval(t);
-      frame.innerHTML = "";
-      show(ov, false);
-      onDone?.();
-    }
-  }, 1000);
+
+  let player = null;
+  let finished = false;
+  let countdown = null;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    clearInterval(countdown);
+    clearTimeout(hintTimer);
+    clearTimeout(maxTimer);
+    try { player?.destroy(); } catch { /* ignorar */ }
+    frame.innerHTML = "";
+    show(ov, false);
+    onDone?.();
+  };
+  // La cuenta atrás empieza cuando de verdad suena la canción (no durante un anuncio)
+  const startCountdown = () => {
+    if (countdown || finished) return;
+    show(hint, false);
+    let left = RICK_SECONDS;
+    msg.innerHTML = `Tu descuento llega en <span id="rick-count">${left}</span>…`;
+    countdown = setInterval(() => {
+      left--;
+      const c = $("#rick-count");
+      if (c) c.textContent = left;
+      if (left <= 0) finish();
+    }, 1000);
+  };
+  // En iPhone Safari no deja sonar sin tocar: avisar
+  const hintTimer = setTimeout(() => { if (!countdown) show(hint); }, 3500);
+  const maxTimer = setTimeout(finish, RICK_MAX_WAIT * 1000);
+
+  loadYouTubeApi().then((YT) => {
+    if (finished) return;
+    player = new YT.Player("rick-player", {
+      host: "https://www.youtube-nocookie.com",
+      videoId: RICK_ID,
+      playerVars: {
+        autoplay: 1, start: RICK_START, controls: 0, disablekb: 1, fs: 0,
+        modestbranding: 1, playsinline: 1, rel: 0, iv_load_policy: 3,
+      },
+      events: {
+        onReady: (e) => { e.target.unMute(); e.target.setVolume(100); e.target.playVideo(); },
+        onStateChange: (e) => {
+          // Solo cuenta si ya está en el estribillo (un anuncio empieza en 0)
+          if (e.data === YT.PlayerState.PLAYING && e.target.getCurrentTime() >= RICK_START - 1) startCountdown();
+          else if (e.data === YT.PlayerState.PLAYING) {
+            const check = setInterval(() => {
+              if (finished) return clearInterval(check);
+              try {
+                if (e.target.getCurrentTime() >= RICK_START - 1) { clearInterval(check); startCountdown(); }
+              } catch { clearInterval(check); }
+            }, 300);
+          }
+        },
+        onError: () => setTimeout(finish, 1500),
+      },
+    });
+  }).catch(() => setTimeout(finish, 2000));
 }
 
 const STATUS = {
