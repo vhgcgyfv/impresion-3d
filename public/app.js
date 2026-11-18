@@ -9,7 +9,7 @@ import {
   query, where, orderBy, onSnapshot, serverTimestamp, increment, limit, runTransaction,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {
-  firebaseConfig, SITE_NAME, EMAILJS, ADMIN_EMAIL, COOWNER_EMAILS, KEYCHAIN_EXTRA, PRODUCTS, PROMO_CODES, OFFERS, PICKUP_PLACES,
+  firebaseConfig, SITE_NAME, PRICE_NOTICE, EMAILJS, ADMIN_EMAIL, COOWNER_EMAILS, KEYCHAIN_EXTRA, PRODUCTS, PROMO_CODES, OFFERS, PICKUP_PLACES,
 } from "./config.js";
 
 // ---------------------------------------------------------------- utilidades
@@ -277,6 +277,12 @@ async function withBusy(btn, fn) {
 }
 
 // ---------------------------------------------------------------- arranque
+// Aviso de cambio de precios (no depende de Firebase)
+$$(".price-notice").forEach((el) => {
+  if (!PRICE_NOTICE?.title && !PRICE_NOTICE?.text) return;
+  el.innerHTML = `<div class="pn-title">${esc(PRICE_NOTICE.title || "")}</div><div class="pn-text">${esc(PRICE_NOTICE.text || "")}</div>`;
+  show(el);
+});
 document.title = SITE_NAME;
 $(".brand span").textContent = SITE_NAME;
 const configured = firebaseConfig.apiKey && !firebaseConfig.apiKey.startsWith("PEGA");
@@ -317,7 +323,31 @@ function start() {
       <p>${esc(o.description)}</p>
       <button class="btn small" data-offer="${esc(o.id)}">La quiero</button>
     </div>`).join("") : `<p class="muted">Ahora mismo no hay ofertas.</p>`;
+  // Recuadro grande que explica el precio (portada y página de pedidos)
+  function renderValueBox() {
+    const prices = catalog.map((p) => Number(p.price)).filter((x) => x > 0);
+    const from = prices.length ? money(Math.min(...prices)) : "";
+    const html = `
+      <div class="vb-head">💡 ¿Por qué cuesta lo que cuesta?</div>
+      <p class="vb-sub">Cada figura se imprime <strong>una a una, solo para ti</strong>. El precio solo cubre lo que cuesta hacerla:</p>
+      <div class="vb-grid">
+        <div class="vb-item"><span class="vb-ico">🧵</span><strong>Filamento</strong><small>El plástico con el que se imprime</small></div>
+        <div class="vb-item"><span class="vb-ico">⚡</span><strong>Electricidad</strong><small>La impresora pasa horas encendida</small></div>
+        <div class="vb-item"><span class="vb-ico">⏱️</span><strong>Tiempo</strong><small>Cada pieza tarda horas en imprimirse</small></div>
+        <div class="vb-item"><span class="vb-ico">🛠️</span><strong>Esfuerzo</strong><small>Prepararla, quitar soportes y dejarla bien acabada</small></div>
+      </div>
+      <ul class="vb-why">
+        ${from ? `<li>💸 <span><strong>Desde ${from}</strong>: precio de amigo, no de tienda</span></li>` : ""}
+        <li>🎨 <span><strong>Hecho a tu gusto</strong>: me dices color, tamaño o detalles</span></li>
+        <li>📦 <span><strong>Sin gastos de envío</strong>: lo recoges en mano</span></li>
+        <li>💶 <span><strong>Nada por adelantado</strong>: pagas en efectivo al recogerlo</span></li>
+        <li>🎁 <span><strong>Ofertas y códigos de descuento</strong> para ahorrar aún más</span></li>
+      </ul>`;
+    $$(".value-box").forEach((el) => { el.innerHTML = html; });
+  }
+
   function renderProducts() {
+    renderValueBox();
     const prev = getItems();
     $("#keychain-price").textContent = `(+${money(keychainExtra)})`;
     $("#products").innerHTML = catalog.length ? catalog.map((p) => `

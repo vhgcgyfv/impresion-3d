@@ -34,6 +34,12 @@ export const EMAILJS = {
   publicKey: "rJSTf0tXceLR1wp5d",   // Account → General → Public Key
 };
 
+// 3c) Aviso en rojo arriba del todo (pon title y text vacíos "" para quitarlo)
+export const PRICE_NOTICE = {
+  title: "⚠️ ¡LOS PRECIOS HAN CAMBIADO!",
+  text: "Antes era tan barato porque la web estaba en pruebas. Ahora cada figura tiene su precio real: por ejemplo, el Fennec y el Octane cuestan 1,50 €.",
+};
+
 // 4) Suplemento por versión llavero (en euros, por pedido)
 export const KEYCHAIN_EXTRA = 0.10;
 
