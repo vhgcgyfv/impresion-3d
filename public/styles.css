@@ -339,3 +339,10 @@ body.coowner .owner-only { display: none !important; }
 .vb-why li { display: flex; gap: 8px; align-items: baseline; }
 .vb-why strong { color: #2b1f00; }
 @media (min-width: 640px) { .vb-grid { grid-template-columns: repeat(4, 1fr); } }
+
+/* ---------- Aviso de precios en rojo ---------- */
+.price-notice { background: #e11d2e; color: #fff; border: 3px solid #8f0010; border-radius: 18px; padding: 16px 18px; margin: 4px 0 14px; text-align: center; box-shadow: 0 8px 24px rgba(225, 29, 46, .35); animation: pn-pulse 1.6s ease-in-out infinite; }
+.pn-title { font-size: 1.6rem; font-weight: 900; line-height: 1.15; margin-bottom: 6px; text-transform: uppercase; }
+.pn-text { font-size: 1.1rem; font-weight: 700; line-height: 1.4; }
+@keyframes pn-pulse { 50% { box-shadow: 0 8px 30px rgba(225, 29, 46, .65); transform: scale(1.01); } }
+@media (prefers-reduced-motion: reduce) { .price-notice { animation: none; } }

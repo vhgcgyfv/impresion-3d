@@ -9,7 +9,7 @@ import {
   query, where, orderBy, onSnapshot, serverTimestamp, increment, limit, runTransaction,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {
-  firebaseConfig, SITE_NAME, EMAILJS, ADMIN_EMAIL, COOWNER_EMAILS, KEYCHAIN_EXTRA, PRODUCTS, PROMO_CODES, OFFERS, PICKUP_PLACES,
+  firebaseConfig, SITE_NAME, PRICE_NOTICE, EMAILJS, ADMIN_EMAIL, COOWNER_EMAILS, KEYCHAIN_EXTRA, PRODUCTS, PROMO_CODES, OFFERS, PICKUP_PLACES,
 } from "./config.js";
 
 // ---------------------------------------------------------------- utilidades
@@ -277,6 +277,12 @@ async function withBusy(btn, fn) {
 }
 
 // ---------------------------------------------------------------- arranque
+// Aviso de cambio de precios (no depende de Firebase)
+$$(".price-notice").forEach((el) => {
+  if (!PRICE_NOTICE?.title && !PRICE_NOTICE?.text) return;
+  el.innerHTML = `<div class="pn-title">${esc(PRICE_NOTICE.title || "")}</div><div class="pn-text">${esc(PRICE_NOTICE.text || "")}</div>`;
+  show(el);
+});
 document.title = SITE_NAME;
 $(".brand span").textContent = SITE_NAME;
 const configured = firebaseConfig.apiKey && !firebaseConfig.apiKey.startsWith("PEGA");
