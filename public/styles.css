@@ -205,7 +205,18 @@ td.num, th.num { text-align: right; }
 .rick { position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,.85); display: grid; place-items: center; padding: 16px; }
 .rick-box { width: min(560px, 100%); display: grid; gap: 12px; text-align: center; color: #fff; }
 .rick-frame { aspect-ratio: 16 / 9; background: #000; border-radius: 12px; overflow: hidden; }
-.rick-frame iframe, .rick-frame #rick-player { width: 100%; height: 100%; display: block; }
+.rick-stage { position: relative; aspect-ratio: 16 / 9; border-radius: 12px; overflow: hidden; background: #000; }
+.rick-stage .rick-frame { position: absolute; inset: 0; aspect-ratio: auto; border-radius: 0; }
+/* el vídeo es más alto que el hueco: así no se ve la barra con el título */
+.rick-frame iframe, .rick-frame #rick-player { position: absolute; left: 0; top: -70px; width: 100%; height: calc(100% + 140px); display: block; }
+/* el regalo tapa la portada; deja pasar los toques al vídeo (iPhone) */
+.rick-cover { position: absolute; inset: 0; display: grid; place-items: center; align-content: center; gap: 8px; pointer-events: none;
+  background: radial-gradient(circle at 50% 40%, #8f73ff, #3b1f9e 70%); transition: opacity .35s ease, transform .35s ease; }
+.rick-cover.open { opacity: 0; transform: scale(1.15); }
+.gift { font-size: 4.5rem; animation: gift-shake 1s ease-in-out infinite; }
+.gift-txt { font-weight: 800; font-size: 1.1rem; }
+@keyframes gift-shake { 0%, 100% { transform: rotate(0); } 20% { transform: rotate(-12deg) scale(1.05); } 40% { transform: rotate(10deg); } 60% { transform: rotate(-6deg); } 80% { transform: rotate(4deg); } }
+@media (prefers-reduced-motion: reduce) { .gift { animation: none; } }
 .rick-hint { font-weight: 800; font-size: 1.1rem; background: #fff; color: #111; border-radius: 999px; padding: 8px 16px; justify-self: center; animation: rick-pulse 1s ease-in-out infinite; }
 @keyframes rick-pulse { 50% { transform: scale(1.06); } }
 @media (prefers-reduced-motion: reduce) { .rick-hint { animation: none; } }

@@ -156,8 +156,10 @@ function rickroll(onDone) {
   const count = $("#rick-count");
   const msg = $("#rick-msg");
   const hint = $("#rick-hint");
+  const cover = $("#rick-cover");
   frame.innerHTML = `<div id="rick-player"></div>`;
-  msg.textContent = "Cargando tu descuento…";
+  msg.textContent = "Abriendo tu regalo…";
+  cover.classList.remove("open");
   show(hint, false);
   show(ov);
 
@@ -179,8 +181,9 @@ function rickroll(onDone) {
   const startCountdown = () => {
     if (countdown || finished) return;
     show(hint, false);
+    cover.classList.add("open"); // ¡sorpresa!
     let left = RICK_SECONDS;
-    msg.innerHTML = `Tu descuento llega en <span id="rick-count">${left}</span>…`;
+    msg.innerHTML = `😂 ¡Te la he colado! Tu descuento llega en <span id="rick-count">${left}</span>…`;
     countdown = setInterval(() => {
       left--;
       const c = $("#rick-count");
