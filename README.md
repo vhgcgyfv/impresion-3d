@@ -8,7 +8,7 @@ Web para que tus amigos te pidan impresiones 3D:
 - **Solo pago en efectivo.**
 - **Co-dueño** (`martincsurcui@gmail.com`): gestiona pedidos (aceptar, precio, hora, lugar, estado, «cómo va») y contesta chats con la etiqueta «🤝 Co-dueño». No puede tocar pagos, precios, borrar pedidos ni usar «sin filamento». Se cambia en `COOWNER_EMAILS` (`public/config.js`) **y** en `firestore.rules`.
 - **Panel de admin** (solo `o39459309@gmail.com`):
-  - Aceptar / rechazar pedidos poniendo **precio, hora y lugar de recogida** (y una nota opcional).
+  - Los pedidos **entran ya aceptados** con el precio calculado. Tú (o el co-dueño) pones **hora y lugar de recogida**, puedes ajustar el precio y **rechazarlos**. El cliente puede cancelar el suyo mientras no esté listo ni pagado.
   - Marcar pedidos como *listo* / *entregado*.
   - **Cuentas**: quién te ha pagado y quién te debe (y cuánto), con un botón para marcar pagado.
   - **Códigos**: cuánta gente ha usado `manchis14`.

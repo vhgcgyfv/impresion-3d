@@ -623,6 +623,10 @@ function start() {
     }
   });
 
+  // Precio del pedido: el que puso el equipo o, si no, el calculado al pedir
+  const orderTotal = (o) => o.total ?? o.estimate ?? 0;
+  const hasPrice = (o) => o.total != null || o.estimate != null;
+
   // ---------- Crear pedido ----------
   $("#order-form").addEventListener("submit", (e) => {
     e.preventDefault();
@@ -649,7 +653,10 @@ function start() {
         offer: f.offer.value,
         keychain: f.keychain.checked,
         promoCode,
-        status: "pendiente",
+        status: "aceptado",
+        ...(Object.keys(items).length && {
+          estimate: calcPrice({ items, offer: f.offer.value, keychain: f.keychain.checked, promoCode }).total,
+        }),
         paid: false,
         createdAt: serverTimestamp(),
       });
@@ -658,7 +665,7 @@ function start() {
       codeApplied = "";
       codeMsg.textContent = "";
       updateSummary();
-      toast("¡Pedido enviado! Te avisaré aquí cuando lo acepte.");
+      toast("✅ ¡Pedido hecho! Te diré aquí la hora y el sitio para recogerlo.");
     });
   });
 
@@ -734,16 +741,19 @@ function start() {
     if (!BILLABLE.includes(o.status)) return "";
     return o.paid
       ? `<span class="badge paid">💶 Pagado</span>`
-      : `<span class="badge owes">💶 Pendiente de pago: ${money(o.total)}</span>`;
+      : `<span class="badge owes">💶 Pendiente de pago: ${hasPrice(o) ? money(orderTotal(o)) : "precio por decidir"}</span>`;
   }
 
   function pickupBox(o) {
     if (!BILLABLE.includes(o.status)) return "";
+    const c = o.price != null ? calcPrice(o, o.price) : hasPrice(o) ? calcPrice(o) : null;
     return `<div class="pickup">
-      ${breakdownHtml(calcPrice(o, o.price ?? 0), { showSubtotal: false })}
-      <div>Precio: <strong>${money(o.total)}</strong> <span class="small">(en efectivo)</span></div>
-      <div>🕒 Recogida: <strong>${esc(fmtPickup(o.pickupTime))}</strong></div>
-      <div>📍 Lugar: <strong>${esc(o.pickupPlace)}</strong></div>
+      ${c ? breakdownHtml(c, { showSubtotal: o.price == null }) : ""}
+      <div>Precio: <strong>${hasPrice(o) ? money(orderTotal(o)) : "por decidir"}</strong> <span class="small">(en efectivo)</span></div>
+      ${o.pickupPlace || o.pickupTime ? `
+        <div>🕒 Recogida: <strong>${o.pickupTime ? esc(fmtPickup(o.pickupTime)) : "te lo digo pronto"}</strong></div>
+        <div>📍 Lugar: <strong>${o.pickupPlace ? esc(o.pickupPlace) : "te lo digo pronto"}</strong></div>`
+        : `<div>🕒📍 <strong>La hora y el sitio de recogida te los digo pronto.</strong></div>`}
     </div>`;
   }
 
@@ -768,7 +778,7 @@ function start() {
         ${progressHtml(o)}
         ${o.adminNote ? `<div class="note">💬 ${esc(o.adminNote)}</div>` : ""}
         ${updatesCache[o.id]?.length ? `<div class="updates-title">📸 Cómo va</div><div class="updates">${updatesHtml(updatesCache[o.id])}</div>` : ""}
-        ${o.status === "pendiente" ? `<div class="actions"><button class="btn bad small" data-cancel="${o.id}">Cancelar pedido</button></div>` : ""}
+        ${["pendiente", "aceptado"].includes(o.status) && !o.paid ? `<div class="actions"><button class="btn bad small" data-cancel="${o.id}">Cancelar pedido</button></div>` : ""}
       </div>`).join("");
   }
 
@@ -800,14 +810,15 @@ function start() {
 
   function renderStats() {
     const billable = allOrders.filter((o) => BILLABLE.includes(o.status));
-    const cobrado = billable.filter((o) => o.paid).reduce((s, o) => s + (o.total || 0), 0);
-    const debe = billable.filter((o) => !o.paid).reduce((s, o) => s + (o.total || 0), 0);
-    const pend = allOrders.filter((o) => o.status === "pendiente").length;
+    const cobrado = billable.filter((o) => o.paid).reduce((s, o) => s + orderTotal(o), 0);
+    const debe = billable.filter((o) => !o.paid).reduce((s, o) => s + orderTotal(o), 0);
+    const pend = allOrders.filter((o) => o.status === "pendiente"
+      || (o.status === "aceptado" && !o.pickupPlace)).length;
     const codeUses = allOrders.filter((o) => o.promoCode === CODE_LIST[0] && !["cancelado"].includes(o.status));
     const codePeople = new Set(codeUses.map((o) => o.uid)).size;
     $("#stats").innerHTML = `
-      <div class="stat"><div class="n">${pend}</div><div class="l">Pedidos pendientes</div></div>
-      <div class="stat"><div class="n">${allOrders.filter((o) => ["aceptado", "listo"].includes(o.status)).length}</div><div class="l">Aceptados / listos</div></div>
+      <div class="stat"><div class="n">${pend}</div><div class="l">Nuevos (sin hora ni sitio)</div></div>
+      <div class="stat"><div class="n">${allOrders.filter((o) => ["aceptado", "listo"].includes(o.status)).length}</div><div class="l">En marcha / listos</div></div>
       <div class="stat owner-only"><div class="n">${money(cobrado)}</div><div class="l">Cobrado</div></div>
       <div class="stat owner-only"><div class="n">${money(debe)}</div><div class="l">Te deben</div></div>
       ${CODE_LIST.length ? `<div class="stat hl"><div class="n">${codePeople}</div><div class="l">Personas con «${esc(CODE_LIST[0])}» (${codeUses.length} pedidos)</div></div>` : ""}`;
@@ -888,13 +899,14 @@ function start() {
             <button class="btn small owner-only ${o.paid ? "" : "ok"}" data-act="paid" data-id="${o.id}">
               ${o.paid ? "↩️ Marcar como NO pagado" : "💶 Marcar como pagado"}</button>
             ${o.status === "aceptado" ? `<button class="btn small" data-act="ready" data-id="${o.id}">📦 Marcar listo</button>` : ""}
+            ${["aceptado", "listo"].includes(o.status) && !o.paid ? `<button class="btn bad small" data-act="reject" data-id="${o.id}">✖ Rechazar</button>` : ""}
             ${o.status !== "entregado" ? `<button class="btn small" data-act="delivered" data-id="${o.id}">🤝 Marcar entregado</button>` : ""}
             <button class="btn small primary" data-act="updates" data-id="${o.id}">📸 Contar cómo va${o.updatesCount ? ` (${o.updatesCount})` : ""}</button>
           </div>
           ${progressHtml(o)}
-          <details><summary>Editar precio / hora / lugar</summary>${priceForm(o, true)}</details>` : ""}
+          <details ${o.pickupPlace ? "" : "open"}><summary>${o.pickupPlace ? "Editar precio / hora / lugar" : "📍 Poner hora y sitio de recogida"}</summary>${priceForm(o, true)}</details>` : ""}
         <div class="actions">
-          ${["rechazado", "cancelado"].includes(o.status) ? `<button class="btn small" data-act="reopen" data-id="${o.id}">Volver a pendiente</button>` : ""}
+          ${["rechazado", "cancelado"].includes(o.status) ? `<button class="btn small" data-act="reopen" data-id="${o.id}">↩️ Volver a activar</button>` : ""}
           <button class="btn small" data-act="chat" data-id="${o.id}">💬 Chat con ${esc(o.userName)}</button>
           <button class="btn bad small owner-only" data-act="delete" data-id="${o.id}">🗑️ Borrar</button>
         </div>
@@ -933,8 +945,7 @@ function start() {
     const pickupPlace = form.querySelector("[name=pickupPlace]").value.trim();
     const adminNote = form.querySelector("[name=adminNote]").value.trim();
     if (isNaN(price) || price < 0) throw new Error("Pon un precio válido.");
-    if (!pickupTime) throw new Error("Pon la hora de recogida.");
-    if (!pickupPlace) throw new Error("Pon el lugar de recogida.");
+
     const o = allOrders.find((x) => x.id === id);
     const c = calcPrice(o, price);
     return {
@@ -970,7 +981,7 @@ function start() {
         }
         case "paid":
           await updateDoc(ref, { paid: !o.paid, paidAt: o.paid ? null : serverTimestamp() });
-          toast(o.paid ? "Marcado como NO pagado." : `💶 ${o.userName} ha pagado ${money(o.total)}.`);
+          toast(o.paid ? "Marcado como NO pagado." : `💶 ${o.userName} ha pagado ${money(orderTotal(o))}.`);
           break;
         case "ready":
           await updateDoc(ref, { status: "listo" });
@@ -979,7 +990,7 @@ function start() {
           await updateDoc(ref, { status: "entregado", deliveredAt: serverTimestamp() });
           break;
         case "reopen":
-          await updateDoc(ref, { status: "pendiente" });
+          await updateDoc(ref, { status: "aceptado" });
           break;
         case "updates":
           openUpdates(o);
@@ -1002,8 +1013,8 @@ function start() {
     allOrders.filter((o) => BILLABLE.includes(o.status)).forEach((o) => {
       const p = people.get(o.uid) || { name: o.userName, email: o.userEmail, total: 0, paid: 0, n: 0, owed: [] };
       p.n++;
-      p.total += o.total || 0;
-      if (o.paid) p.paid += o.total || 0; else p.owed.push(o);
+      p.total += orderTotal(o);
+      if (o.paid) p.paid += orderTotal(o); else p.owed.push(o);
       people.set(o.uid, p);
     });
     const rows = [...people.values()].sort((a, b) => (b.total - b.paid) - (a.total - a.paid));
@@ -1021,7 +1032,7 @@ function start() {
             </div>
             ${p.owed.map((o) => `
               <div class="actions" style="align-items:center;justify-content:space-between">
-                <span class="small">#${shortId(o.id)} · ${esc((o.description || itemsText(o.items)).slice(0, 50))}${(o.description || itemsText(o.items)).length > 50 ? "…" : ""} · <strong>${money(o.total)}</strong></span>
+                <span class="small">#${shortId(o.id)} · ${esc((o.description || itemsText(o.items)).slice(0, 50))}${(o.description || itemsText(o.items)).length > 50 ? "…" : ""} · <strong>${money(orderTotal(o))}</strong></span>
                 <button class="btn ok small" data-pay="${o.id}">💶 Pagado</button>
               </div>`).join("")}
           </div>`).join("") : `<div class="empty">Nadie te debe nada 🎉</div>`}
@@ -1046,7 +1057,7 @@ function start() {
     const o = allOrders.find((x) => x.id === id);
     withBusy(e.target, async () => {
       await updateDoc(doc(db, "orders", id), { paid: true, paidAt: serverTimestamp() });
-      toast(`💶 ${o.userName} ha pagado ${money(o.total)}.`);
+      toast(`💶 ${o.userName} ha pagado ${money(orderTotal(o))}.`);
     });
   });
 
@@ -1111,7 +1122,7 @@ function start() {
     const added = snap.docChanges()
       .filter((c) => c.type === "added" && !c.doc.metadata.hasPendingWrites)
       .map((c) => ({ id: c.doc.id, ...c.doc.data() }))
-      .filter((o) => o.status === "pendiente");
+      .filter((o) => ["pendiente", "aceptado"].includes(o.status));
     if (!added.length) return;
     added.forEach((o) => {
       const what = itemsText(o.items) || (o.description || "").slice(0, 60);

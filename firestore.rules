@@ -105,11 +105,12 @@ service cloud.firestore {
       allow read: if isStaff()
         || (signedIn() && resource.data.uid == request.auth.uid);
 
-      // Un amigo solo puede crear pedidos "pendiente", sin precio ni pago
+      // Los pedidos entran ya aceptados (sin pagar). El precio calculado va en
+      // "estimate"; el precio de verdad ("total") solo lo pone el equipo.
       allow create: if signedIn()
         && request.resource.data.keys().hasOnly([
              'uid', 'userName', 'userEmail', 'description', 'offer',
-             'items', 'keychain', 'promoCode', 'status', 'paid', 'createdAt'])
+             'items', 'keychain', 'promoCode', 'status', 'estimate', 'paid', 'createdAt'])
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.userEmail == request.auth.token.email
         && shortString(request.resource.data.userName, 1, 60)
@@ -119,12 +120,16 @@ service cloud.firestore {
         && shortString(request.resource.data.offer, 0, 40)
         && shortString(request.resource.data.promoCode, 0, 30)
         && request.resource.data.keychain is bool
-        && request.resource.data.status == 'pendiente'
+        && request.resource.data.status == 'aceptado'
+        && (!('estimate' in request.resource.data)
+            || (request.resource.data.estimate is number
+                && request.resource.data.estimate >= 0
+                && request.resource.data.estimate <= 1000))
         && request.resource.data.paid == false
         && request.resource.data.createdAt == request.time;
 
       // El dueño puede cambiarlo todo; el co-dueño todo menos el dinero;
-      // el amigo solo puede cancelar si sigue pendiente
+      // el amigo puede cancelar su pedido mientras no esté listo ni pagado
       allow update: if isOwner()
         || (isCoOwner()
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
@@ -133,7 +138,8 @@ service cloud.firestore {
                  'lastUpdateAt']))
         || (signedIn()
             && resource.data.uid == request.auth.uid
-            && resource.data.status == 'pendiente'
+            && resource.data.status in ['pendiente', 'aceptado']
+            && resource.data.paid == false
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
             && request.resource.data.status == 'cancelado');
 
