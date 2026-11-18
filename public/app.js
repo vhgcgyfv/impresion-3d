@@ -242,7 +242,6 @@ const roleOfEmail = (email) => {
   if ((COOWNER_EMAILS || []).some((x) => x.toLowerCase() === e)) return "coowner";
   return null;
 };
-const isBannedEmail = (email) => (BANNED_EMAILS || []).some((x) => x.toLowerCase() === (email || "").toLowerCase());
 const ROLE_LABEL = { owner: "👑 Dueño", coowner: "🤝 Co-dueño" };
 
 let toastTimer;
@@ -342,7 +341,7 @@ function start() {
         <li>🎨 <span><strong>Hecho a tu gusto</strong>: me dices color, tamaño o detalles</span></li>
         <li>📦 <span><strong>Sin gastos de envío</strong>: lo recoges en mano</span></li>
         <li>💶 <span><strong>Nada por adelantado</strong>: pagas en efectivo al recogerlo</span></li>
-        <li>🎁 <span><strong>Ofertas y códigos de descuento</strong> para ahorrar aún más</span></li>
+        <li>🎁 <span><strong>${CODE_LIST.length ? "Ofertas y códigos de descuento" : "Ofertas"}</strong> para ahorrar aún más</span></li>
       </ul>`;
     $$(".value-box").forEach((el) => { el.innerHTML = html; });
   }
@@ -474,6 +473,11 @@ function start() {
     renderProducts();
     if (isAdmin) renderAdmin();
   }, (e) => console.error(e));
+
+  if (!CODE_LIST.length) {
+    show($("#promo-field"), false);
+    show($("#codes-tab"), false);
+  }
 
   // ---------- Login / registro ----------
   $$("[data-auth-tab]").forEach((b) => b.addEventListener("click", () => {
@@ -679,7 +683,14 @@ function start() {
     show($("#auth-view"), false);
     show($("#nav"));
 
-    if (isBannedEmail(user.email)) {
+    // ¿Está baneado? (se gestiona en el panel → Ban)
+    let banned = false;
+    try { banned = (await getDoc(doc(db, "bans", user.email.toLowerCase()))).exists(); } catch (e) { console.error(e); }
+    // si le banean o le desbanean con la web abierta, se recarga
+    unsubs.push(onSnapshot(doc(db, "bans", user.email.toLowerCase()), (s) => {
+      if (s.exists() !== banned) location.reload();
+    }, () => {}));
+    if (banned) {
       // cuenta bloqueada: solo puede salir
       isAdmin = false;
       myRole = null;
@@ -737,6 +748,17 @@ function start() {
         },
         (e) => toast(authError(e), true),
       ));
+      if (myRole === "owner") {
+        unsubs.push(onSnapshot(collection(db, "bans"), (snap) => {
+          allBans = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          migrateConfigBans();
+          renderBans();
+        }, (e) => console.error(e)));
+        unsubs.push(onSnapshot(collection(db, "users"), (snap) => {
+          allUsers = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          renderBans();
+        }, (e) => console.error(e)));
+      }
       unsubs.push(onSnapshot(
         query(collection(db, "chats"), orderBy("lastAt", "desc")),
         (snap) => {
@@ -1651,6 +1673,82 @@ function start() {
       .filter((o) => ["cancelado", "rechazado"].includes(o.status) && o.fromStock && !o.stockReturned)
       .forEach(returnStockOf);
   }
+
+  // ---------- Ban: banear y desbanear cuentas ----------
+  let allBans = [];
+  let allUsers = [];
+  let migrated = false;
+  const isMe = (email) => (email || "").toLowerCase() === ADMIN_EMAIL.toLowerCase();
+
+  // los correos de BANNED_EMAILS (config.js) pasan solos a la lista de baneos
+  function migrateConfigBans() {
+    if (migrated) return;
+    migrated = true;
+    (BANNED_EMAILS || []).map((e) => e.toLowerCase()).filter((e) => !isMe(e) && !allBans.some((b) => b.id === e))
+      .forEach((e) => setDoc(doc(db, "bans", e), { email: e, reason: "", at: serverTimestamp() }).catch(console.error));
+  }
+
+  async function banEmail(email, reason = "") {
+    const e = email.trim().toLowerCase();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) throw new Error("Ese correo no es válido.");
+    if (isMe(e)) throw new Error("No te puedes banear a ti mismo 😅");
+    const u = allUsers.find((x) => (x.email || "").toLowerCase() === e);
+    await setDoc(doc(db, "bans", e), { email: e, reason: reason.slice(0, 200), name: u?.name || "", at: serverTimestamp() });
+    toast(`🚫 ${u?.name || e} baneado.`);
+  }
+
+  function renderBans() {
+    const box = $("#ban-list");
+    if (!box) return;
+    box.innerHTML = allBans.length ? allBans.map((b) => `
+      <div class="ban-row">
+        <div class="ban-main"><strong>${esc(b.name || b.email || b.id)}</strong>
+          <div class="muted small">${esc(b.email || b.id)}${b.at ? ` · ${fmtDate(b.at)}` : ""}${b.reason ? ` · ${esc(b.reason)}` : ""}</div></div>
+        <button type="button" class="btn ok small" data-unban="${esc(b.id)}">✅ Desbanear</button>
+      </div>`).join("") : `<div class="empty">No hay nadie baneado.</div>`;
+
+    $("#users-emails").innerHTML = allUsers.map((u) => `<option value="${esc(u.email)}">${esc(u.name)}</option>`).join("");
+    const q = ($("#user-search").value || "").trim().toLowerCase();
+    const list = allUsers
+      .filter((u) => !q || `${u.name} ${u.email}`.toLowerCase().includes(q))
+      .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+    $("#user-list").innerHTML = list.length ? list.map((u) => {
+      const e = (u.email || "").toLowerCase();
+      const isBan = allBans.some((b) => b.id === e);
+      return `<div class="ban-row">
+        <div class="ban-main"><strong>${esc(u.name)}</strong> ${isBan ? `<span class="badge owes">Baneado</span>` : ""}
+          <div class="muted small">${esc(u.email)}</div></div>
+        ${isMe(e) ? `<span class="muted small">👑 Tú</span>`
+          : isBan ? `<button type="button" class="btn ok small" data-unban="${esc(e)}">✅ Desbanear</button>`
+          : `<button type="button" class="btn bad small" data-ban="${esc(e)}">🚫 Banear</button>`}
+      </div>`;
+    }).join("") : `<div class="empty">No hay cuentas.</div>`;
+  }
+
+  $("#ban-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const f = e.target;
+    withBusy(f.querySelector("button[type=submit]"), async () => {
+      if (!confirm(`¿Banear a ${f.email.value.trim()}? No podrá pedir ni usar el chat.`)) return;
+      await banEmail(f.email.value, f.reason.value.trim());
+      f.reset();
+    });
+  });
+  $("#user-search").addEventListener("input", renderBans);
+  $("#admin-bans").addEventListener("click", (e) => {
+    const ban = e.target.closest("[data-ban]");
+    const unban = e.target.closest("[data-unban]");
+    if (ban) {
+      if (!confirm(`¿Banear a ${ban.dataset.ban}? No podrá pedir ni usar el chat.`)) return;
+      withBusy(ban, () => banEmail(ban.dataset.ban));
+    } else if (unban) {
+      if (!confirm(`¿Desbanear a ${unban.dataset.unban}?`)) return;
+      withBusy(unban, async () => {
+        await deleteDoc(doc(db, "bans", unban.dataset.unban));
+        toast("✅ Desbaneado.");
+      });
+    }
+  });
 
   // ---------- Sin filamento: cancelar todo lo que no está hecho ----------
   $("#no-filament").addEventListener("click", (e) => {

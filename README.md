@@ -4,10 +4,10 @@ Web para que tus amigos te pidan impresiones 3D:
 
 - **Cuentas**: para crear cuenta hace falta **usuario + correo + código de verificación + contraseña**. El código de 6 cifras llega al correo. No se pueden repetir usuarios.
 - **Pedidos**: eligen productos con precio fijo (**Fennec 0,50 €**, **Balón 0,25 €**), escriben detalles en un cuadro de texto, pueden elegir una **oferta**, la **versión llavero (+0,10 €)** y un **código de apoyo**. Ven el total aproximado al momento.
-- **Código `manchis14`**: al escribirlo sale una sorpresa de 5 segundos 🎵 y luego se aplica un **10 % de descuento**.
+- **Códigos de apoyo**: ahora no hay ninguno (se quitó `manchis14`). Se añaden en `PROMO_CODES` (`public/config.js`), con descuento y sorpresa opcional.
 - **Solo pago en efectivo.**
 - **Co-dueños**: ahora no hay ninguno. Para añadir uno, pon su correo en `COOWNER_EMAILS` (`public/config.js`) **y** en `isCoOwner()` de `firestore.rules`. Gestiona pedidos y chats, pero no pagos, precios ni borrar.
-- **Cuentas bloqueadas**: `BANNED_EMAILS` (`public/config.js`) **y** `isBanned()` en `firestore.rules`. No pueden pedir ni chatear; al entrar ven «Tu cuenta está bloqueada».
+- **Ban**: en el panel → pestaña «🚫 Ban» baneas y desbaneas cuentas por correo (o desde la lista de cuentas). Una cuenta baneada no puede pedir ni chatear; al entrar ve «Tu cuenta está bloqueada». No hay ban por IP: sin servidor propio no se puede hacer de forma fiable.
 - **Panel de admin** (solo `o39459309@gmail.com`):
   - Los pedidos **entran ya aceptados** con el precio calculado. Tú (o el co-dueño) pones **hora y lugar de recogida**, puedes ajustar el precio y **rechazarlos**. El cliente puede cancelar el suyo mientras no esté listo ni pagado.
   - Marcar pedidos como *listo* / *entregado*.

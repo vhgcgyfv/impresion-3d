@@ -24,9 +24,10 @@ service cloud.firestore {
         && request.auth.token.email_verified == true;
     }
 
-    // Cuentas bloqueadas: no pueden pedir, chatear ni nada
+    // Cuentas baneadas (se gestionan en el panel → Ban): no pueden pedir, chatear ni nada
     function isBanned() {
-      return signedIn() && request.auth.token.email in ['martincsurcui@gmail.com'];
+      return signedIn()
+        && exists(/databases/$(database)/documents/bans/$(request.auth.token.email));
     }
 
     function isStaff() {
@@ -49,6 +50,14 @@ service cloud.firestore {
         && (!('username' in request.resource.data)
             || getAfter(/databases/$(database)/documents/usernames/$(request.resource.data.username)).data.uid == request.auth.uid);
       allow delete: if isOwner();
+    }
+
+    // ---------- Baneos ----------
+    // Solo el dueño banea/desbanea. Cada uno puede comprobar si él mismo está baneado.
+    match /bans/{email} {
+      allow get: if isStaff() || (signedIn() && request.auth.token.email == email);
+      allow list: if isStaff();
+      allow write: if isOwner() && email != 'o39459309@gmail.com';
     }
 
     // ---------- Nombres de usuario (para que no se repitan) ----------
