@@ -294,6 +294,36 @@ async function withBusy(btn, fn) {
   try { await fn(); } catch (e) { toast(authError(e), true); } finally { if (btn) btn.disabled = false; }
 }
 
+// ---------------------------------------------------------------- registro de recargas
+// ¿Cómo se ha abierto esta página? manual = la persona recargó; auto = la recargó la web
+// (con el motivo); memoria = el navegador cerró la pestaña para ahorrar memoria; entrada = visita normal.
+const PAGE_LOAD = (() => {
+  let auto = null;
+  try { auto = sessionStorage.getItem("autoReload"); sessionStorage.removeItem("autoReload"); } catch { /* sin almacenamiento */ }
+  const nav = performance.getEntriesByType?.("navigation")?.[0];
+  if (document.wasDiscarded) return { kind: "memoria", reason: "El navegador cerró la pestaña para ahorrar memoria" };
+  if (nav?.type === "reload") return auto ? { kind: "auto", reason: auto } : { kind: "manual", reason: "" };
+  return { kind: "entrada", reason: nav?.type === "back_forward" ? "Botón atrás/adelante" : "" };
+})();
+// recarga hecha por la propia web (queda apuntado el motivo)
+function autoReload(reason) {
+  try { sessionStorage.setItem("autoReload", reason); } catch { /* ignorar */ }
+  location.reload();
+}
+// errores de la web (para saber si hay un fallo de verdad)
+const PAGE_ERRORS = [];
+const noteError = (msg) => { if (PAGE_ERRORS.length < 3 && msg) PAGE_ERRORS.push(String(msg).slice(0, 200)); };
+window.addEventListener("error", (e) => noteError(e.message || e.error?.message));
+window.addEventListener("unhandledrejection", (e) => noteError(e.reason?.message || e.reason));
+const DEVICE = (() => {
+  const ua = navigator.userAgent;
+  const os = /iPhone|iPad/.test(ua) ? (ua.match(/iPhone|iPad/)[0]) : /Android/.test(ua) ? "Android"
+    : /Windows/.test(ua) ? "Windows" : /Mac OS/.test(ua) ? "Mac" : /Linux/.test(ua) ? "Linux" : "Otro";
+  const br = /Edg\//.test(ua) ? "Edge" : /OPR\//.test(ua) ? "Opera" : /CriOS|Chrome\//.test(ua) ? "Chrome"
+    : /FxiOS|Firefox\//.test(ua) ? "Firefox" : /Safari\//.test(ua) ? "Safari" : "Otro";
+  return `${os} · ${br}`;
+})();
+
 // ---------------------------------------------------------------- emojis personalizables
 // El dueño puede cambiar cualquier emoji de la web (settings/emojis = { map: { "🔥": "🌟" } }).
 // Se cambian en el texto que se ve, nunca en lo que escribe la gente.
@@ -545,7 +575,7 @@ function start() {
     if (snap.metadata.hasPendingWrites) return; // esperar a que se guarde de verdad
     const map = snap.exists() ? (snap.data().map || {}) : {};
     if (emojisLoaded) {
-      if (JSON.stringify(map) !== JSON.stringify(emojiMap)) location.reload();
+      if (JSON.stringify(map) !== JSON.stringify(emojiMap)) autoReload("Se cambiaron los emojis");
       return;
     }
     emojisLoaded = true;
@@ -878,7 +908,7 @@ function start() {
     } catch (e) { console.error(e); }
     // si le banean o le desbanean con la web abierta, se recarga
     unsubs.push(onSnapshot(doc(db, "bans", user.email.toLowerCase()), (s) => {
-      if (isActiveBan(s) !== banned) location.reload();
+      if (isActiveBan(s) !== banned) autoReload(banned ? "Le quitaron el ban" : "Le banearon");
     }, () => {}));
     if (banned) {
       const bu = $("#blocked-until");
@@ -887,7 +917,7 @@ function start() {
         : "";
       show(bu, Boolean(banUntil));
       const left = banUntil ? banUntil.toMillis() - Date.now() : 0;
-      if (banUntil && left < 2 ** 31 - 1) setTimeout(() => location.reload(), left + 1500);
+      if (banUntil && left < 2 ** 31 - 1) setTimeout(() => autoReload("Se acabó su ban"), left + 1500);
       // cuenta bloqueada: solo puede salir
       isAdmin = false;
       myRole = null;
@@ -916,7 +946,7 @@ function start() {
       unsubs.push(onSnapshot(doc(db, "roles", user.uid), (s) => {
         const nr = s.exists() && s.data().role === "coowner" ? "coowner" : null;
         const np = nr ? JSON.stringify(s.data().perms || DEFAULT_PERMS) : "";
-        if (nr !== emailRole || np !== permsKey) location.reload();
+        if (nr !== emailRole || np !== permsKey) autoReload("Le cambiaron el rango o los permisos");
       }, () => {}));
     }
     const emailIsAdmin = Boolean(emailRole);
@@ -930,7 +960,7 @@ function start() {
         await user.reload();
         if (auth.currentUser?.emailVerified) {
           await auth.currentUser.getIdToken(true);
-          location.reload(); // empezar de cero con el permiso nuevo
+          autoReload("Verificó su correo"); // empezar de cero con el permiso nuevo
           return;
         }
       } catch (e) { console.error(e); }
@@ -970,6 +1000,7 @@ function start() {
       profileName = user.displayName || profileName || user.email;
     }
     renderHeader();
+    logVisit(user);
 
     // Pedidos del propio usuario
     unsubs.push(onSnapshot(
@@ -1009,6 +1040,12 @@ function start() {
           renderRoles();
           renderAnalytics();
           runSeeds();
+        }, (e) => console.error(e)));
+      }
+      if (can("stats")) {
+        unsubs.push(onSnapshot(query(collection(db, "visits"), orderBy("at", "desc"), limit(500)), (snap) => {
+          allVisits = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          renderAnalytics();
         }, (e) => console.error(e)));
       }
       if (myRole === "owner") {
@@ -2242,6 +2279,33 @@ function start() {
     }
   });
 
+  // ---------- Registro de entradas y recargas ----------
+  let visitLogged = false;
+  function logVisit(user) {
+    if (visitLogged) return;
+    visitLogged = true;
+    const base = {
+      uid: user.uid,
+      name: (profileName || user.email).slice(0, 60),
+      email: user.email,
+      device: DEVICE.slice(0, 120),
+    };
+    const write = (kind, reason) => addDoc(collection(db, "visits"), {
+      ...base, kind, reason: String(reason || "").slice(0, 200), at: serverTimestamp(),
+    }).catch((e) => console.warn("visits", e));
+    write(PAGE_LOAD.kind, PAGE_LOAD.reason);
+    // errores: los que ya hubo y los que vengan (como mucho 3 por visita)
+    let sent = 0;
+    const flush = () => { while (sent < PAGE_ERRORS.length) write("error", PAGE_ERRORS[sent++]); };
+    flush();
+    setInterval(flush, 5000);
+  }
+  let allVisits = [];
+  const VISIT_KINDS = {
+    manual: "🔄 Recarga manual", auto: "⚙️ Recarga de la web", memoria: "📱 Cierre por memoria",
+    error: "🐞 Error", entrada: "🚪 Entrada",
+  };
+
   // ---------- Analíticas ----------
   let anRange = 30;
   const DAY = 864e5;
@@ -2350,8 +2414,40 @@ function start() {
         <div class="card an-card"><h3>Mejores clientes</h3>${hbars(topClients, money)}</div>
       </div>
 
+      ${visitsHtml(from)}
+
       <div class="card an-card"><h3>Estado de los pedidos</h3>
         ${byStatus.length ? `<div class="an-status">${byStatus.map((x) => `<span class="badge st-${x.k}">${STATUS[x.k]}: ${x.n}</span>`).join("")}</div>` : `<div class="empty">Sin pedidos en este periodo.</div>`}
+      </div>`;
+  }
+
+  // tabla de entradas y recargas por persona
+  function visitsHtml(from) {
+    const list = allVisits.filter((v) => (v.at?.toMillis?.() ?? Date.now()) >= from);
+    const people = new Map();
+    list.forEach((v) => {
+      const p = people.get(v.uid) || { name: v.name, email: v.email, entrada: 0, manual: 0, auto: 0, memoria: 0, error: 0 };
+      p[v.kind] = (p[v.kind] || 0) + 1;
+      people.set(v.uid, p);
+    });
+    const rows = [...people.values()].sort((a, b) => b.manual - a.manual || b.entrada - a.entrada);
+    return `
+      <div class="card an-card">
+        <h3>🔄 Entradas y recargas</h3>
+        <p class="muted small">🔄 manual = la persona recargó (F5, botón o arrastrar hacia abajo en el móvil). ⚙️ = la recargó la web (con el motivo). 📱 = el móvil cerró la pestaña por memoria. 🐞 = error de la web.</p>
+        ${rows.length ? `<div class="table-wrap"><table>
+          <thead><tr><th>Persona</th><th class="num">🚪</th><th class="num">🔄</th><th class="num">⚙️</th><th class="num">📱</th><th class="num">🐞</th></tr></thead>
+          <tbody>${rows.map((p) => `<tr>
+            <td><strong>${esc(p.name)}</strong><br><span class="muted small">${esc(p.email)}</span></td>
+            <td class="num">${p.entrada}</td><td class="num ${p.manual >= 5 ? "hot" : ""}">${p.manual}</td>
+            <td class="num">${p.auto}</td><td class="num">${p.memoria}</td><td class="num">${p.error}</td></tr>`).join("")}</tbody>
+        </table></div>
+        <details class="an-table"><summary>Ver lo último que ha pasado</summary>
+          <div class="visit-log">${list.slice(0, 40).map((v) => `
+            <div class="visit"><span>${VISIT_KINDS[v.kind] || esc(v.kind)}</span>
+              <strong>${esc(v.name)}</strong>
+              <span class="muted small">${fmtDate(v.at)} · ${esc(v.device || "")}${v.reason ? ` · ${esc(v.reason)}` : ""}</span></div>`).join("")}</div>
+        </details>` : `<div class="empty">Todavía no hay datos en este periodo.</div>`}
       </div>`;
   }
 

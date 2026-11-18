@@ -24,6 +24,7 @@ Web para que tus amigos te pidan impresiones 3D:
   - **📝 Fichas de producto**: en Precios, botón «Ficha» para poner descripción y hasta 4 fotos. En la tienda, al tocar un producto se abre su ficha.
   - **⏳ Bans temporales**: 1 hora, 1 día, 3 días, 1 semana, 1 mes o para siempre.
   - **⚙️ Permisos del co-dueño**: en Roles eliges qué puede hacer cada co-dueño. Las contraseñas no se pueden ver (Firebase solo guarda una huella cifrada); hay un botón para mandar el correo de cambiar contraseña.
+  - **🔄 Entradas y recargas** (en Analíticas): cada entrada y recarga de cada persona, distinguiendo recarga manual, recarga hecha por la web (con motivo), cierre de la pestaña por memoria del móvil y errores de la web.
   - **Sin filamento**: un botón que cancela de golpe todos los pedidos pendientes y aceptados que aún no has marcado como listos (tus amigos ven el aviso).
   - **Stock**: en Precios, cuántas unidades tienes hechas de cada producto (vacío = sin límite, 0 = agotado). Baja solo con cada pedido y vuelve al momento si se cancela o rechaza.
   - **Precios**: cambia el precio de cada producto y del llavero, añade o quita productos. Tus amigos ven los precios nuevos al momento.

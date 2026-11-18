@@ -479,3 +479,8 @@ body.guest #guest-hero { display: block !important; text-align: center; margin: 
 .pm-price { font-size: 1.3rem; font-weight: 800; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .pm-desc { white-space: pre-wrap; line-height: 1.5; }
 .blocked-until { font-weight: 700; color: var(--text); }
+
+/* ---------- Entradas y recargas ---------- */
+td.hot { color: var(--bad); font-weight: 800; }
+.visit-log { display: grid; gap: 6px; margin-top: 8px; max-height: 360px; overflow-y: auto; }
+.visit { display: grid; gap: 2px; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: .9rem; }
