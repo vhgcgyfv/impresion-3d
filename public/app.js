@@ -6,7 +6,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
   getFirestore, connectFirestoreEmulator, collection, addDoc, doc, setDoc, getDoc, updateDoc, deleteDoc, writeBatch,
-  query, where, orderBy, onSnapshot, serverTimestamp, increment, limit, runTransaction,
+  query, where, orderBy, onSnapshot, serverTimestamp, increment, limit, runTransaction, Timestamp,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {
   firebaseConfig, SITE_NAME, PRICE_NOTICE, EMAILJS, ADMIN_EMAIL, COOWNER_EMAILS, ROLE_SEEDS, KEYCHAIN_EXTRA, PRODUCTS, PROMO_CODES, OFFERS, PICKUP_PLACES,
@@ -29,9 +29,27 @@ const fmtPickup = (v) => {
   return d.toLocaleString("es-ES", { weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" });
 };
 const shortId = (id) => id.slice(0, 6).toUpperCase();
-const offerTitle = (id) => OFFERS.find((o) => o.id === id)?.title || id;
-const CODE_LIST = Object.keys(PROMO_CODES);
-const codeInfo = (c) => (c && PROMO_CODES[c]) || null;
+// Ofertas y códigos: empiezan con los de config.js y se cambian desde el panel
+let offersList = OFFERS.map((o) => ({ active: true, ...o }));
+let promoCodes = { ...PROMO_CODES };
+let CODE_LIST = Object.keys(promoCodes).filter((c) => promoCodes[c]?.active !== false);
+const offerTitle = (id) => offersList.find((o) => o.id === id)?.title || id;
+const codeInfo = (c) => (c && promoCodes[c] && promoCodes[c].active !== false ? promoCodes[c] : null);
+
+// Permisos que el dueño puede dar a un co-dueño
+const PERMS = [
+  ["orders", "📦 Pedidos (hora, sitio, precio, estado, «cómo va», rechazar)"],
+  ["chats", "💬 Chats"],
+  ["money", "💶 Pagos y cuentas"],
+  ["prices", "🏷️ Precios, productos, fichas y stock"],
+  ["offers", "🔥 Ofertas"],
+  ["codes", "🎟️ Códigos"],
+  ["notices", "📢 Avisos"],
+  ["emojis", "😀 Emojis"],
+  ["bans", "🚫 Banear"],
+  ["stats", "📊 Analíticas"],
+];
+const DEFAULT_PERMS = { orders: true, chats: true };
 // Precios actuales: empiezan con los de config.js y el admin los cambia desde el panel
 let catalog = PRODUCTS.map((p) => ({ ...p }));
 let keychainExtra = KEYCHAIN_EXTRA;
@@ -44,7 +62,7 @@ function calcPrice({ items = {}, offer = "", keychain = false, promoCode = "" },
   let subtotal = 0;
   for (const [id, q] of Object.entries(items)) subtotal += (productOf(id)?.price || 0) * q;
   let offerDiscount = 0;
-  const of = OFFERS.find((o) => o.id === offer);
+  const of = offersList.find((o) => o.id === offer && o.active !== false);
   if (of?.free && Object.entries(of.items || {}).every(([id, q]) => (items[id] || 0) >= q)) {
     for (const [id, q] of Object.entries(of.free)) offerDiscount += (productOf(id)?.price || 0) * q;
   }
@@ -381,30 +399,50 @@ function start() {
   let profileName = "";
   let isAdmin = false; // dueño o co-dueño (verificado)
   let myRole = null;  // "owner" | "coowner" | null
+  let myPerms = {};   // permisos del co-dueño
+  const can = (p) => myRole === "owner" || (myRole === "coowner" && Boolean(myPerms[p]));
+  // muestra u oculta lo que depende de permisos
+  function applyPerms() {
+    $$("[data-perm]").forEach((el) => el.classList.toggle("perm-off", !can(el.dataset.perm)));
+    const active = $("[data-admin-tab].active");
+    if (!active || active.classList.contains("perm-off")) {
+      $$("[data-admin-tab]").find((t) => !t.classList.contains("perm-off") && !t.classList.contains("hidden")
+        && !(t.classList.contains("owner-only") && myRole !== "owner"))?.click();
+    }
+  }
   let unsubs = [];
   let myOrders = [];
   let allOrders = [];
 
   // ---------- Ofertas y formulario ----------
   const offerSelect = $("#offer-select");
-  OFFERS.forEach((o) => offerSelect.insertAdjacentHTML("beforeend",
-    `<option value="${esc(o.id)}">${esc(o.title)}</option>`));
-  $("#offers").innerHTML = OFFERS.length ? OFFERS.map((o) => `
-    <div class="offer">
-      <div class="emoji">${esc(o.emoji)}</div>
-      <h3>${esc(o.title)}</h3>
-      <p>${esc(o.description)}</p>
-      <button class="btn small" data-offer="${esc(o.id)}">La quiero</button>
-    </div>`).join("") : `<p class="muted">Ahora mismo no hay ofertas.</p>`;
+  function renderOffers() {
+    const live = offersList.filter((o) => o.active !== false);
+    const prev = offerSelect.value;
+    offerSelect.innerHTML = `<option value="">Sin oferta</option>` + live.map((o) =>
+      `<option value="${esc(o.id)}">${esc(o.title)}</option>`).join("");
+    offerSelect.value = live.some((o) => o.id === prev) ? prev : "";
+    $("#offers").innerHTML = live.length ? live.map((o) => `
+      <div class="offer">
+        <div class="emoji">${esc(o.emoji || "🎁")}</div>
+        <h3>${esc(o.title)}</h3>
+        ${o.description ? `<p>${esc(o.description)}</p>` : ""}
+        <button class="btn small" data-offer="${esc(o.id)}">La quiero</button>
+      </div>`).join("") : `<p class="muted">Ahora mismo no hay ofertas.</p>`;
+    show($("#offers").previousElementSibling, true);
+  }
+  renderOffers();
   function renderProducts() {
     const prev = getItems();
     $("#keychain-price").textContent = `(+${money(keychainExtra)})`;
     $("#products").innerHTML = catalog.length ? catalog.map((p) => `
     <div class="product">
+      <button type="button" class="p-open" data-open-product="${esc(p.id)}" aria-label="Ver ${esc(p.name)}">
       ${p.photo && PHOTO_RE.test(p.photo)
-        ? `<img class="p-photo" src="${p.photo}" alt="${esc(p.name)}" data-zoom />`
+        ? `<img class="p-photo" src="${p.photo}" alt="" />`
         : `<div class="p-emoji">${esc(p.emoji)}</div>`}
-      <div class="p-info"><strong>${esc(p.name)}</strong><span class="muted small">${money(p.price)}</span>
+      </button>
+      <div class="p-info" data-open-product="${esc(p.id)}"><strong>${esc(p.name)} <span class="p-more">ⓘ</span></strong><span class="muted small">${money(p.price)}</span>
         ${stockOf(p.id) == null ? "" : stockOf(p.id) > 0
           ? `<span class="stock-ok">✅ Quedan ${stockOf(p.id)}</span>`
           : `<span class="stock-out">❌ Agotado</span>`}</div>
@@ -460,7 +498,7 @@ function start() {
   $("#order-form").addEventListener("change", updateSummary);
 
   offerSelect.addEventListener("change", () => {
-    const o = OFFERS.find((x) => x.id === offerSelect.value);
+    const o = offersList.find((x) => x.id === offerSelect.value);
     if (o?.items) {
       setItems({ ...getItems(), ...Object.fromEntries(
         Object.entries(o.items).map(([id, q]) => [id, Math.max(q, getItems()[id] || 0)])) });
@@ -547,10 +585,26 @@ function start() {
     if (isAdmin) renderAdmin();
   }, (e) => console.error(e));
 
-  if (!CODE_LIST.length) {
-    show($("#promo-field"), false);
-    show($("#codes-tab"), false);
+  function applyCodesUi() {
+    CODE_LIST = Object.keys(promoCodes).filter((c) => promoCodes[c]?.active !== false);
+    show($("#promo-field"), CODE_LIST.length > 0);
   }
+  applyCodesUi();
+
+  // Ofertas y códigos en directo (los cambia el equipo desde el panel)
+  onSnapshot(doc(db, "settings", "offers"), (snap) => {
+    if (!snap.exists() || snap.metadata.hasPendingWrites) return;
+    offersList = Array.isArray(snap.data().items) ? snap.data().items : [];
+    renderOffers();
+    updateSummary();
+    if (isAdmin) renderAdmin();
+  }, (e) => console.error(e));
+  onSnapshot(doc(db, "settings", "codes"), (snap) => {
+    if (!snap.exists() || snap.metadata.hasPendingWrites) return;
+    promoCodes = snap.data().codes || {};
+    applyCodesUi();
+    if (isAdmin) renderAdmin();
+  }, (e) => console.error(e));
 
   // ---------- Ventana de entrar (para quien mira sin cuenta) ----------
   let pendingIntent = null;
@@ -576,6 +630,7 @@ function start() {
   const WANTS = "#products [data-step], #products [data-qty], #offers [data-offer], #order-form input, #order-form textarea, #order-form select, #order-form label, #order-form button";
   function guard(e) {
     if (currentUser || !$("#auth-view").classList.contains("hidden")) return;
+    if (e.target.closest?.("[data-open-product]")) return; // ver la ficha no necesita cuenta
     const el = e.target.closest?.(WANTS);
     if (!el || !$("#client-view").contains(el)) return;
     e.preventDefault();
@@ -814,12 +869,25 @@ function start() {
 
     // ¿Está baneado? (se gestiona en el panel → Ban)
     let banned = false;
-    try { banned = (await getDoc(doc(db, "bans", user.email.toLowerCase()))).exists(); } catch (e) { console.error(e); }
+    let banUntil = null;
+    const isActiveBan = (s) => s.exists() && (!s.data().until || s.data().until.toMillis() > Date.now());
+    try {
+      const bs = await getDoc(doc(db, "bans", user.email.toLowerCase()));
+      banned = isActiveBan(bs);
+      banUntil = banned ? bs.data().until || null : null;
+    } catch (e) { console.error(e); }
     // si le banean o le desbanean con la web abierta, se recarga
     unsubs.push(onSnapshot(doc(db, "bans", user.email.toLowerCase()), (s) => {
-      if (s.exists() !== banned) location.reload();
+      if (isActiveBan(s) !== banned) location.reload();
     }, () => {}));
     if (banned) {
+      const bu = $("#blocked-until");
+      bu.textContent = banUntil
+        ? `⏳ Se desbloquea el ${banUntil.toDate().toLocaleString("es-ES", { weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" })}.`
+        : "";
+      show(bu, Boolean(banUntil));
+      const left = banUntil ? banUntil.toMillis() - Date.now() : 0;
+      if (banUntil && left < 2 ** 31 - 1) setTimeout(() => location.reload(), left + 1500);
       // cuenta bloqueada: solo puede salir
       isAdmin = false;
       myRole = null;
@@ -835,14 +903,20 @@ function start() {
     // Rango: dueño por su correo; el resto, el que le dé el dueño en el panel (roles/{uid})
     let emailRole = roleOfEmail(user.email);
     if (!emailRole) {
+      let permsKey = "";
       try {
         const r = await getDoc(doc(db, "roles", user.uid));
-        if (r.exists() && r.data().role === "coowner") emailRole = "coowner";
+        if (r.exists() && r.data().role === "coowner") {
+          emailRole = "coowner";
+          myPerms = r.data().perms || DEFAULT_PERMS;
+          permsKey = JSON.stringify(myPerms);
+        }
       } catch (e) { console.error(e); }
-      // si le dan o le quitan el rango con la web abierta, se recarga
+      // si le dan o le quitan el rango (o cambian sus permisos) con la web abierta, se recarga
       unsubs.push(onSnapshot(doc(db, "roles", user.uid), (s) => {
         const nr = s.exists() && s.data().role === "coowner" ? "coowner" : null;
-        if (nr !== emailRole) location.reload();
+        const np = nr ? JSON.stringify(s.data().perms || DEFAULT_PERMS) : "";
+        if (nr !== emailRole || np !== permsKey) location.reload();
       }, () => {}));
     }
     const emailIsAdmin = Boolean(emailRole);
@@ -875,6 +949,7 @@ function start() {
     }
     isAdmin = emailIsAdmin && verifiedNow;
     myRole = isAdmin ? emailRole : null;
+    applyPerms();
     document.body.classList.toggle("coowner", myRole === "coowner");
     $("#admin-title").textContent = myRole === "coowner" ? "🤝 Panel de co-dueño" : "🛠️ Panel de administrador";
     show($("#verify-banner"), (emailIsAdmin || !CODES_ON) && !verifiedNow);
@@ -907,7 +982,7 @@ function start() {
       (e) => toast(authError(e), true),
     ));
 
-    if (isAdmin) {
+    if (isAdmin && (can("orders") || can("stats") || can("money"))) {
       unsubs.push(onSnapshot(
         query(collection(db, "orders"), orderBy("createdAt", "desc")),
         (snap) => {
@@ -918,11 +993,16 @@ function start() {
         },
         (e) => toast(authError(e), true),
       ));
-      if (myRole === "owner") {
+    }
+    if (isAdmin) {
+      if (can("bans")) {
         unsubs.push(onSnapshot(collection(db, "bans"), (snap) => {
           allBans = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
           renderBans();
+          renderRoles();
         }, (e) => console.error(e)));
+      }
+      if (myRole === "owner" || can("bans") || can("stats")) {
         unsubs.push(onSnapshot(collection(db, "users"), (snap) => {
           allUsers = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
           renderBans();
@@ -930,6 +1010,8 @@ function start() {
           renderAnalytics();
           runSeeds();
         }, (e) => console.error(e)));
+      }
+      if (myRole === "owner") {
         unsubs.push(onSnapshot(collection(db, "roles"), (snap) => {
           allRoles = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
           renderRoles();
@@ -939,7 +1021,7 @@ function start() {
           runSeeds();
         }, (e) => console.error(e)));
       }
-      unsubs.push(onSnapshot(
+      if (can("chats")) unsubs.push(onSnapshot(
         query(collection(db, "chats"), orderBy("lastAt", "desc")),
         (snap) => {
           allChats = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
@@ -948,6 +1030,7 @@ function start() {
         },
         (e) => console.error(e),
       ));
+      renderAdmin();
       setView("admin");
     } else {
       let prevUnread = null;
@@ -1178,6 +1261,7 @@ function start() {
   $("#search").addEventListener("input", renderAdminOrders);
 
   function renderAdmin() {
+    renderOfferEditor();
     renderEmojiEditor();
     renderPricesEditor();
     renderNoticeEditor();
@@ -1200,8 +1284,8 @@ function start() {
     $("#stats").innerHTML = `
       <div class="stat"><div class="n">${pend}</div><div class="l">Nuevos (sin hora ni sitio)</div></div>
       <div class="stat"><div class="n">${allOrders.filter((o) => ["aceptado", "listo"].includes(o.status)).length}</div><div class="l">En marcha / listos</div></div>
-      <div class="stat owner-only"><div class="n">${money(cobrado)}</div><div class="l">Cobrado</div></div>
-      <div class="stat owner-only"><div class="n">${money(debe)}</div><div class="l">Te deben</div></div>
+      ${can("money") ? `<div class="stat"><div class="n">${money(cobrado)}</div><div class="l">Cobrado</div></div>
+      <div class="stat"><div class="n">${money(debe)}</div><div class="l">Te deben</div></div>` : ""}
       ${CODE_LIST.length ? `<div class="stat hl"><div class="n">${codePeople}</div><div class="l">Personas con «${esc(CODE_LIST[0])}» (${codeUses.length} pedidos)</div></div>` : ""}`;
   }
 
@@ -1277,7 +1361,7 @@ function start() {
         ${isPending ? priceForm(o, false) : ""}
         ${billable ? `
           <div class="actions">
-            <button class="btn small owner-only ${o.paid ? "" : "ok"}" data-act="paid" data-id="${o.id}">
+            <button class="btn small ${can("money") ? "" : "hidden"} ${o.paid ? "" : "ok"}" data-act="paid" data-id="${o.id}">
               ${o.paid ? "↩️ Marcar como NO pagado" : "💶 Marcar como pagado"}</button>
             ${o.status === "aceptado" ? `<button class="btn small" data-act="ready" data-id="${o.id}">📦 Marcar listo</button>` : ""}
             ${["aceptado", "listo"].includes(o.status) && !o.paid ? `<button class="btn bad small" data-act="reject" data-id="${o.id}">✖ Rechazar</button>` : ""}
@@ -1870,7 +1954,7 @@ function start() {
       out.push({ e: k, label });
     };
     catalog.forEach((p) => p.emoji && add(p.emoji, `Producto: ${p.name}`));
-    OFFERS.forEach((o) => [...new Intl.Segmenter("es", { granularity: "grapheme" }).segment(o.emoji || "")]
+    offersList.forEach((o) => [...new Intl.Segmenter("es", { granularity: "grapheme" }).segment(o.emoji || "")]
       .forEach((g) => add(g.segment, `Oferta: ${o.title}`)));
     EMOJI_INFO.forEach(([e, label]) => add(e, label));
     return out;
@@ -1909,6 +1993,164 @@ function start() {
     withBusy(e.currentTarget, async () => {
       emojisDirty = false;
       await setDoc(doc(db, "settings", "emojis"), { map: {}, updatedAt: serverTimestamp() });
+    });
+  });
+
+  // ---------- Ofertas: crear y editar ----------
+  let offersDirty = false;
+  function offerRow(o) {
+    const qtyInputs = (kind, map) => catalog.map((p) => `
+      <label class="oq"><span>${esc(p.emoji || "")} ${esc(p.name)}</span>
+        <input type="number" min="0" max="20" step="1" data-${kind}="${esc(p.id)}" value="${(map || {})[p.id] || ""}" placeholder="0" /></label>`).join("");
+    return `<div class="notice-row" data-orow data-id="${esc(o.id || "")}">
+      <div class="nr-head">
+        <input name="emoji" class="emoji-in" maxlength="12" value="${esc(o.emoji || "")}" placeholder="🎁" aria-label="Emoji" />
+        <label class="switch"><input type="checkbox" name="active" ${o.active !== false ? "checked" : ""} /> Activa</label>
+        <button type="button" class="btn bad small" data-del-offer aria-label="Quitar oferta">✕</button>
+      </div>
+      <input name="title" maxlength="60" placeholder="Título (ej: 2 Fennecs + balón GRATIS)" value="${esc(o.title || "")}" />
+      <textarea name="description" rows="2" maxlength="300" placeholder="Descripción">${esc(o.description || "")}</textarea>
+      <div class="oq-title">Incluye</div><div class="oq-grid">${qtyInputs("inc", o.items)}</div>
+      <div class="oq-title">Gratis (se descuenta)</div><div class="oq-grid">${qtyInputs("free", o.free)}</div>
+    </div>`;
+  }
+  function renderOfferEditor() {
+    if (offersDirty || !$("#offer-rows")) return;
+    $("#offer-rows").innerHTML = offersList.length ? offersList.map(offerRow).join("")
+      : `<div class="empty">No hay ofertas. Pulsa «Añadir oferta».</div>`;
+  }
+  $("#admin-offers").addEventListener("input", (e) => { if (e.target.closest("[data-orow]")) offersDirty = true; });
+  $("#admin-offers").addEventListener("click", (e) => {
+    if (e.target.closest("#add-offer")) {
+      offersDirty = true;
+      if (!$("#offer-rows [data-orow]")) $("#offer-rows").innerHTML = "";
+      $("#offer-rows").insertAdjacentHTML("beforeend", offerRow({ emoji: "🎁", active: true }));
+      $$("#offer-rows [name=title]").at(-1).focus();
+    } else if (e.target.closest("[data-del-offer]")) {
+      offersDirty = true;
+      e.target.closest("[data-orow]").remove();
+    } else if (e.target.closest("#reset-offers")) {
+      offersDirty = false;
+      renderOfferEditor();
+    } else if (e.target.closest("#save-offers")) {
+      withBusy(e.target, async () => {
+        const used = new Set();
+        const items = $$("#offer-rows [data-orow]").map((r) => {
+          const title = r.querySelector("[name=title]").value.trim();
+          if (!title) throw new Error("Hay una oferta sin título.");
+          const read = (kind) => Object.fromEntries($$(`[data-${kind}]`, r)
+            .map((i) => [i.dataset[kind], Math.max(0, Math.round(Number(i.value) || 0))]).filter(([, q]) => q > 0));
+          let id = r.dataset.id || (slug(title) + "-" + Math.random().toString(36).slice(2, 6));
+          while (used.has(id)) id += "-2";
+          used.add(id);
+          return {
+            id, title,
+            emoji: r.querySelector("[name=emoji]").value.trim(),
+            description: r.querySelector("[name=description]").value.trim(),
+            items: read("inc"), free: read("free"),
+            active: r.querySelector("[name=active]").checked,
+          };
+        });
+        offersDirty = false;
+        await setDoc(doc(db, "settings", "offers"), { items, updatedAt: serverTimestamp() });
+        offersList = items;
+        renderOffers();
+        renderOfferEditor();
+        toast("🔥 Ofertas guardadas.");
+      });
+    }
+  });
+
+  // ---------- Ficha de producto (nombre, descripción y fotos) ----------
+  const productDetails = {};
+  async function loadDetails(id) {
+    if (productDetails[id]) return productDetails[id];
+    try {
+      const s = await getDoc(doc(db, "products", id));
+      productDetails[id] = s.exists() ? s.data() : {};
+    } catch (e) { console.error(e); productDetails[id] = {}; }
+    return productDetails[id];
+  }
+  async function openProduct(id) {
+    const p = productOf(id);
+    if (!p) return;
+    $("#pm-name").textContent = `${p.emoji && !p.photo ? p.emoji + " " : ""}${p.name}`;
+    $("#pm-body").innerHTML = `<div class="muted small">Cargando…</div>`;
+    show($("#product-modal"));
+    document.body.classList.add("modal-open");
+    const d = await loadDetails(id);
+    const pics = [p.photo, ...(d.photos || [])].filter((x) => x && PHOTO_RE.test(x));
+    const st = stockOf(id);
+    $("#pm-body").innerHTML = `
+      ${pics.length ? `<div class="pm-photos">${pics.map((x) => `<img src="${x}" alt="Foto de ${esc(p.name)}" data-zoom />`).join("")}</div>`
+        : `<div class="pm-emoji">${esc(p.emoji || "🧊")}</div>`}
+      <div class="pm-price">${money(p.price)} ${st == null ? "" : st > 0 ? `<span class="stock-ok">✅ Quedan ${st}</span>` : `<span class="stock-out">❌ Agotado</span>`}</div>
+      ${d.description ? `<p class="pm-desc">${esc(d.description)}</p>` : `<p class="muted">Sin descripción todavía.</p>`}
+      <div class="actions">
+        <button type="button" class="btn primary" data-pm-add="${esc(id)}" ${maxQty(id) ? "" : "disabled"}>➕ Añadir al pedido</button>
+        <button type="button" class="btn ghost" data-pm-back>← Volver</button>
+      </div>`;
+  }
+  function closeProduct() {
+    show($("#product-modal"), false);
+    document.body.classList.remove("modal-open");
+  }
+  $("#products").addEventListener("click", (e) => {
+    const t = e.target.closest("[data-open-product]");
+    if (t) openProduct(t.dataset.openProduct);
+  });
+  $("#pm-close").addEventListener("click", closeProduct);
+  $("#product-modal").addEventListener("click", (e) => {
+    if (e.target.id === "product-modal" || e.target.closest("[data-pm-back]")) return closeProduct();
+    const add = e.target.closest("[data-pm-add]");
+    if (add) {
+      closeProduct();
+      $(`#products [data-step="1"][data-pid="${CSS.escape(add.dataset.pmAdd)}"]`)?.click();
+    }
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !$("#product-modal").classList.contains("hidden")) closeProduct();
+  });
+
+  // editar la ficha (equipo con permiso de precios)
+  let peId = null;
+  let pePhotos = [];
+  const renderPePreviews = () => {
+    $("#pe-previews").innerHTML = pePhotos.map((p, i) => `<div class="thumb"><img src="${p}" alt="Foto ${i + 1}" /><button type="button" data-rm="${i}" aria-label="Quitar foto">✕</button></div>`).join("");
+  };
+  async function openProductEditor(id) {
+    const p = productOf(id);
+    if (!id || !p) return toast("Guarda primero los precios para poder hacer la ficha de este producto.", true);
+    peId = id;
+    delete productDetails[id];
+    const d = await loadDetails(id);
+    $("#pe-title").textContent = `📝 Ficha: ${p.name}`;
+    $("#pe-form").description.value = d.description || "";
+    pePhotos = (d.photos || []).filter((x) => PHOTO_RE.test(x));
+    renderPePreviews();
+    show($("#pe-modal"));
+  }
+  $("#pe-close").addEventListener("click", () => show($("#pe-modal"), false));
+  $("#pe-previews").addEventListener("click", (e) => {
+    const i = e.target.closest("[data-rm]")?.dataset.rm;
+    if (i != null) { pePhotos.splice(Number(i), 1); renderPePreviews(); }
+  });
+  $("#pe-files").addEventListener("change", async (e) => {
+    const files = [...e.target.files];
+    e.target.value = "";
+    for (const f of files.slice(0, Math.max(0, 4 - pePhotos.length))) {
+      try { pePhotos.push(await compressImage(f, { side: 900, budget: 150000 })); } catch (err) { toast(err.message, true); }
+      renderPePreviews();
+    }
+  });
+  $("#pe-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    withBusy(e.target.querySelector("button[type=submit]"), async () => {
+      const data = { description: e.target.description.value.trim().slice(0, 1000), photos: pePhotos, updatedAt: serverTimestamp() };
+      await setDoc(doc(db, "products", peId), data);
+      productDetails[peId] = data;
+      show($("#pe-modal"), false);
+      toast("📝 Ficha guardada.");
     });
   });
 
@@ -1997,7 +2239,7 @@ function start() {
 
   function renderAnalytics() {
     const box = $("#an-body");
-    if (!box || myRole !== "owner") return;
+    if (!box || !can("stats")) return;
     const now = Date.now();
     const from = anRange ? now - anRange * DAY : 0;
     const inRange = allOrders.filter((o) => ms(o) >= from);
@@ -2154,16 +2396,50 @@ function start() {
         <div class="ban-main"><strong>${esc(u.name)}</strong>
           ${role ? `<span class="role ${role}">${ROLE_NAMES[role]}</span>` : ""}
           ${banned ? `<span class="badge owes">Baneado</span>` : ""}
-          <div class="muted small">${esc(u.email)}</div></div>
+          <div class="muted small">${esc(u.email)}</div>
+          <button type="button" class="link small" data-reset-pass="${esc(u.email)}">📧 Mandar correo para cambiar contraseña</button></div>
         ${isMe(u.email) ? `<span class="role owner">👑 Dueño</span>`
           : `<select data-role-uid="${esc(u.id)}" aria-label="Rango de ${esc(u.name)}">
               ${Object.entries(ROLE_NAMES).map(([k, v]) => `<option value="${k}" ${k === role ? "selected" : ""}>${v}</option>`).join("")}
             </select>`}
-      </div>`;
+      </div>
+      ${role === "coowner" ? (() => {
+        const perms = allRoles.find((r) => r.id === u.id)?.perms || DEFAULT_PERMS;
+        return `<details class="perm-box" data-perm-uid="${esc(u.id)}" ${openPermBoxes.has(u.id) ? "open" : ""}>
+          <summary>⚙️ Permisos de ${esc(u.name)}</summary>
+          <div class="perm-grid">${PERMS.map(([k, label]) => `
+            <label class="switch"><input type="checkbox" data-perm-key="${k}" ${perms[k] ? "checked" : ""} /> ${label}</label>`).join("")}
+          </div>
+        </details>`;
+      })() : ""}`;
     }).join("") : `<div class="empty">No hay cuentas.</div>`;
   }
+  const openPermBoxes = new Set();
   $("#role-search").addEventListener("input", renderRoles);
+  $("#role-list").addEventListener("toggle", (e) => {
+    const box = e.target.closest?.("[data-perm-uid]");
+    if (box) (box.open ? openPermBoxes.add(box.dataset.permUid) : openPermBoxes.delete(box.dataset.permUid));
+  }, true);
+  $("#role-list").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-reset-pass]");
+    if (!b) return;
+    if (!confirm(`¿Mandar a ${b.dataset.resetPass} un correo para poner una contraseña nueva?`)) return;
+    withBusy(b, async () => {
+      await sendPasswordResetEmail(auth, b.dataset.resetPass);
+      toast("📧 Correo para cambiar la contraseña enviado.");
+    });
+  });
   $("#role-list").addEventListener("change", (e) => {
+    const pk = e.target.closest("[data-perm-key]");
+    if (pk) {
+      const box = pk.closest("[data-perm-uid]");
+      const perms = Object.fromEntries($$("[data-perm-key]", box).map((i) => [i.dataset.permKey, i.checked]));
+      withBusy(null, async () => {
+        await updateDoc(doc(db, "roles", box.dataset.permUid), { perms });
+        toast("⚙️ Permisos guardados. Se le aplican al momento.");
+      });
+      return;
+    }
     const sel = e.target.closest("[data-role-uid]");
     if (!sel) return;
     const u = allUsers.find((x) => x.id === sel.dataset.roleUid);
@@ -2176,7 +2452,7 @@ function start() {
     withBusy(sel, async () => {
       if (role) {
         const b = writeBatch(db);
-        b.set(doc(db, "roles", u.id), { role, email: u.email, name: u.name || "", at: serverTimestamp() });
+        b.set(doc(db, "roles", u.id), { role, email: u.email, name: u.name || "", perms: DEFAULT_PERMS, at: serverTimestamp() });
         b.delete(doc(db, "bans", (u.email || "").toLowerCase())); // con rango no puede estar baneado
         await b.commit();
         toast(`${ROLE_NAMES[role]} dado a ${u.name}. 📧 Le llegará el enlace al entrar.`);
@@ -2187,13 +2463,16 @@ function start() {
     });
   });
 
-  async function banEmail(email, reason = "") {
+  const banActive = (b) => b && (!b.until || b.until.toMillis() > Date.now());
+  const banUntilText = (b) => (b?.until ? `hasta el ${b.until.toDate().toLocaleString("es-ES", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}` : "para siempre");
+  async function banEmail(email, reason = "", hours = Number($("#ban-dur")?.value) || 0) {
     const e = email.trim().toLowerCase();
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) throw new Error("Ese correo no es válido.");
     if (isMe(e)) throw new Error("No te puedes banear a ti mismo 😅");
     const u = allUsers.find((x) => (x.email || "").toLowerCase() === e);
-    await setDoc(doc(db, "bans", e), { email: e, reason: reason.slice(0, 200), name: u?.name || "", at: serverTimestamp() });
-    toast(`🚫 ${u?.name || e} baneado.`);
+    const until = hours ? Timestamp.fromMillis(Date.now() + hours * 3600e3) : null;
+    await setDoc(doc(db, "bans", e), { email: e, reason: reason.slice(0, 200), name: u?.name || "", at: serverTimestamp(), until });
+    toast(`🚫 ${u?.name || e} baneado ${banUntilText({ until })}.`);
   }
 
   function renderBans() {
@@ -2202,7 +2481,8 @@ function start() {
     box.innerHTML = allBans.length ? allBans.map((b) => `
       <div class="ban-row">
         <div class="ban-main"><strong>${esc(b.name || b.email || b.id)}</strong>
-          <div class="muted small">${esc(b.email || b.id)}${b.at ? ` · ${fmtDate(b.at)}` : ""}${b.reason ? ` · ${esc(b.reason)}` : ""}</div></div>
+          <div class="muted small">${esc(b.email || b.id)}${b.at ? ` · ${fmtDate(b.at)}` : ""}${b.reason ? ` · ${esc(b.reason)}` : ""}</div>
+          <div class="small">${banActive(b) ? `⏳ ${banUntilText(b)}` : "✅ Ya ha caducado"}</div></div>
         <button type="button" class="btn ok small" data-unban="${esc(b.id)}">✅ Desbanear</button>
       </div>`).join("") : `<div class="empty">No hay nadie baneado.</div>`;
 
@@ -2213,7 +2493,7 @@ function start() {
       .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
     $("#user-list").innerHTML = list.length ? list.map((u) => {
       const e = (u.email || "").toLowerCase();
-      const isBan = allBans.some((b) => b.id === e);
+      const isBan = allBans.some((b) => b.id === e && banActive(b));
       return `<div class="ban-row">
         <div class="ban-main"><strong>${esc(u.name)}</strong> ${isBan ? `<span class="badge owes">Baneado</span>` : ""}
           <div class="muted small">${esc(u.email)}</div></div>
@@ -2238,7 +2518,8 @@ function start() {
     const ban = e.target.closest("[data-ban]");
     const unban = e.target.closest("[data-unban]");
     if (ban) {
-      if (!confirm(`¿Banear a ${ban.dataset.ban}? No podrá pedir ni usar el chat.`)) return;
+      const dur = $("#ban-dur").selectedOptions[0].textContent.toLowerCase();
+      if (!confirm(`¿Banear a ${ban.dataset.ban} (${dur})? No podrá pedir ni usar el chat.`)) return;
       withBusy(ban, () => banEmail(ban.dataset.ban));
     } else if (unban) {
       if (!confirm(`¿Desbanear a ${unban.dataset.unban}?`)) return;
@@ -2288,6 +2569,7 @@ function start() {
       <label class="euro"><input name="price" type="number" min="0" step="0.01" inputmode="decimal" value="${p.price ?? ""}" aria-label="Precio" /> €</label>
       <label class="stock-in">📦 Stock <input name="stock" type="number" min="0" step="1" inputmode="numeric" value="${p.id && stockOf(p.id) != null ? stockOf(p.id) : ""}" placeholder="∞" aria-label="Stock" /></label>
       <input name="id" type="hidden" value="${esc(p.id || "")}" />
+      <button type="button" class="btn small" data-edit-details="${esc(p.id || "")}" aria-label="Descripción y fotos">📝 Ficha</button>
       <button type="button" class="btn bad small" data-del-row aria-label="Quitar producto">✕</button>
     </div>`;
   }
@@ -2334,7 +2616,9 @@ function start() {
 
   $("#admin-prices").addEventListener("input", () => { pricesDirty = true; });
   $("#admin-prices").addEventListener("click", (e) => {
-    if (e.target.closest("[data-rm-pphoto]")) {
+    if (e.target.closest("[data-edit-details]")) {
+      openProductEditor(e.target.closest("[data-edit-details]").dataset.editDetails);
+    } else if (e.target.closest("[data-rm-pphoto]")) {
       setRowPhoto(e.target.closest("[data-row]"), "");
     } else if (e.target.closest("[data-pick-pphoto]")) {
       pPhotoRow = e.target.closest("[data-row]");
@@ -2388,8 +2672,62 @@ function start() {
   });
 
   // ---------- Códigos de apoyo ----------
+  // ---------- Códigos: crear los tuyos ----------
+  let codesDirty = false;
+  function codeRow(code, c) {
+    return `<div class="code-row" data-crow>
+      <input name="code" value="${esc(code)}" maxlength="30" placeholder="micodigo" aria-label="Código" />
+      <label class="euro"><input name="discount" type="number" min="0" max="100" step="1" value="${c.discount ?? 10}" aria-label="Descuento" /> %</label>
+      <label class="switch"><input type="checkbox" name="rickroll" ${c.rickroll ? "checked" : ""} /> Sorpresa</label>
+      <label class="switch"><input type="checkbox" name="active" ${c.active !== false ? "checked" : ""} /> Activo</label>
+      <button type="button" class="btn bad small" data-del-code aria-label="Quitar código">✕</button>
+    </div>`;
+  }
+  function renderCodeEditor() {
+    if (codesDirty || !$("#code-rows")) return;
+    const entries = Object.entries(promoCodes);
+    $("#code-rows").innerHTML = entries.length ? entries.map(([k, c]) => codeRow(k, c)).join("")
+      : `<div class="empty">No hay códigos. Pulsa «Añadir código».</div>`;
+  }
+  $("#admin-codes").addEventListener("input", (e) => { if (e.target.closest("[data-crow]")) codesDirty = true; });
+  $("#admin-codes").addEventListener("click", (e) => {
+    if (e.target.closest("#add-code")) {
+      codesDirty = true;
+      if (!$("#code-rows [data-crow]")) $("#code-rows").innerHTML = "";
+      $("#code-rows").insertAdjacentHTML("beforeend", codeRow("", { discount: 10, rickroll: false, active: true }));
+      $$("#code-rows [name=code]").at(-1).focus();
+    } else if (e.target.closest("[data-del-code]")) {
+      codesDirty = true;
+      e.target.closest("[data-crow]").remove();
+    } else if (e.target.closest("#reset-codes")) {
+      codesDirty = false;
+      renderCodeEditor();
+    } else if (e.target.closest("#save-codes")) {
+      withBusy(e.target, async () => {
+        const codes = {};
+        $$("#code-rows [data-crow]").forEach((r) => {
+          const code = r.querySelector("[name=code]").value.trim().toLowerCase();
+          if (!code) return;
+          if (!/^[a-z0-9_-]{2,30}$/.test(code)) throw new Error(`El código «${code}» solo puede tener letras, números, - o _.`);
+          if (codes[code]) throw new Error(`El código «${code}» está repetido.`);
+          const d = Math.round(Number(r.querySelector("[name=discount]").value));
+          if (!(d >= 0 && d <= 100)) throw new Error(`El descuento de «${code}» tiene que ser de 0 a 100.`);
+          codes[code] = { discount: d, rickroll: r.querySelector("[name=rickroll]").checked, active: r.querySelector("[name=active]").checked };
+        });
+        codesDirty = false;
+        await setDoc(doc(db, "settings", "codes"), { codes, updatedAt: serverTimestamp() });
+        promoCodes = codes;
+        applyCodesUi();
+        renderCodeEditor();
+        renderCodes();
+        toast("🎟️ Códigos guardados.");
+      });
+    }
+  });
+
   function renderCodes() {
-    $("#admin-codes").innerHTML = CODE_LIST.map((code) => {
+    renderCodeEditor();
+    $("#code-usage").innerHTML = Object.keys(promoCodes).map((code) => {
       const uses = allOrders.filter((o) => o.promoCode === code);
       const valid = uses.filter((o) => o.status !== "cancelado");
       const people = new Map();
@@ -2414,6 +2752,6 @@ function start() {
               <td class="num">${p.n}</td><td class="num">${p.accepted}</td></tr>`).join("")}</tbody>
           </table></div>` : `<div class="empty">Nadie ha usado este código todavía.</div>`}
         </div>`;
-    }).join("") || `<div class="empty">No hay códigos configurados.</div>`;
+    }).join("");
   }
 }

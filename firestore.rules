@@ -16,7 +16,6 @@ service cloud.firestore {
         && request.auth.token.email_verified == true;
     }
 
-    // Co-dueño: gestiona pedidos y chats, pero no el dinero, los precios ni borrar
     // Co-dueño: el dueño le da el rango en el panel (roles/{uid}) y su correo tiene que estar verificado
     function isCoOwner() {
       return signedIn()
@@ -25,10 +24,20 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/roles/$(request.auth.uid)).data.role == 'coowner';
     }
 
-    // Cuentas baneadas (se gestionan en el panel → Ban): no pueden pedir, chatear ni nada
+    // Permisos del co-dueño (los marca el dueño en Roles). Sin lista: solo pedidos y chats.
+    function can(p) {
+      return isOwner() || (isCoOwner() && (
+        get(/databases/$(database)/documents/roles/$(request.auth.uid)).data.get('perms', null) == null
+          ? (p == 'orders' || p == 'chats')
+          : get(/databases/$(database)/documents/roles/$(request.auth.uid)).data.perms.get(p, false) == true));
+    }
+
+    // Cuentas baneadas (panel → Ban): no pueden pedir ni chatear. Con "until", el ban caduca solo.
     function isBanned() {
       return signedIn()
-        && exists(/databases/$(database)/documents/bans/$(request.auth.token.email));
+        && exists(/databases/$(database)/documents/bans/$(request.auth.token.email))
+        && (get(/databases/$(database)/documents/bans/$(request.auth.token.email)).data.get('until', null) == null
+            || get(/databases/$(database)/documents/bans/$(request.auth.token.email)).data.until > request.time);
     }
 
     function isStaff() {
@@ -61,11 +70,11 @@ service cloud.firestore {
     }
 
     // ---------- Baneos ----------
-    // Solo el dueño banea/desbanea. Cada uno puede comprobar si él mismo está baneado.
+    // Banea el dueño (o el co-dueño con permiso). Cada uno puede comprobar si él mismo está baneado.
     match /bans/{email} {
       allow get: if isStaff() || (signedIn() && request.auth.token.email == email);
-      allow list: if isStaff();
-      allow write: if isOwner() && email != 'o39459309@gmail.com';
+      allow list: if can('bans');
+      allow write: if can('bans') && email != 'o39459309@gmail.com';
     }
 
     // ---------- Nombres de usuario (para que no se repitan) ----------
@@ -78,11 +87,22 @@ service cloud.firestore {
       allow delete: if isOwner();
     }
 
-    // ---------- Ajustes de la tienda (precios) ----------
-    // Todos pueden ver los precios; solo el admin puede cambiarlos
+    // ---------- Ajustes de la tienda ----------
+    // Todos los ven; los cambia el dueño o el co-dueño con el permiso de esa parte
     match /settings/{id} {
       allow read: if true;
-      allow write: if isOwner();
+      allow write: if isOwner()
+        || (id == 'shop' && can('prices'))
+        || (id == 'offers' && can('offers'))
+        || (id == 'codes' && can('codes'))
+        || (id == 'notices' && can('notices'))
+        || (id == 'emojis' && can('emojis'));
+    }
+
+    // ---------- Ficha de cada producto (descripción y fotos) ----------
+    match /products/{pid} {
+      allow read: if true;
+      allow write: if can('prices');
     }
 
     // ---------- Stock de cada producto ----------
@@ -98,7 +118,7 @@ service cloud.firestore {
       }
 
       allow read: if true;
-      allow write: if isStaff();
+      allow write: if can('prices') || can('orders');
       allow update: if signedIn()
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['qty', 'lastOrder'])
         && request.resource.data.qty is int
@@ -120,7 +140,7 @@ service cloud.firestore {
       // Reservas: cuánto stock ha sacado cada pedido
       match /holds/{orderId} {
         allow read: if isStaff() || (signedIn() && resource.data.uid == request.auth.uid);
-        allow write: if isStaff();
+        allow write: if can('prices') || can('orders');
         allow create: if signedIn()
           && request.resource.data.keys().hasOnly(['uid', 'qty'])
           && request.resource.data.uid == request.auth.uid
@@ -138,8 +158,8 @@ service cloud.firestore {
 
     // ---------- Chat de cada amigo con el vendedor ----------
     match /chats/{uid} {
-      allow read: if isStaff() || (signedIn() && request.auth.uid == uid);
-      allow create, update: if isStaff()
+      allow read: if can('chats') || (signedIn() && request.auth.uid == uid);
+      allow create, update: if can('chats')
         || (signedIn()
             && !isBanned()
             && request.auth.uid == uid
@@ -159,9 +179,9 @@ service cloud.firestore {
       allow delete: if isOwner();
 
       match /messages/{messageId} {
-        allow read: if isStaff() || (signedIn() && request.auth.uid == uid);
+        allow read: if can('chats') || (signedIn() && request.auth.uid == uid);
         // el dueño y el co-dueño mandan texto y fotos (con su etiqueta); el amigo, solo texto
-        allow create: if (isStaff()
+        allow create: if (can('chats')
               && request.resource.data.keys().hasOnly(['from', 'by', 'text', 'photos', 'createdAt'])
               && request.resource.data.from == 'admin'
               && request.resource.data.by == (isOwner() ? 'owner' : 'coowner'))
@@ -178,7 +198,7 @@ service cloud.firestore {
 
     // ---------- Pedidos ----------
     match /orders/{orderId} {
-      allow read: if isStaff()
+      allow read: if can('orders') || can('stats') || can('money')
         || (signedIn() && resource.data.uid == request.auth.uid);
 
       // Los pedidos entran ya aceptados (sin pagar). El precio calculado va en
@@ -207,14 +227,16 @@ service cloud.firestore {
         && request.resource.data.paid == false
         && request.resource.data.createdAt == request.time;
 
-      // El dueño puede cambiarlo todo; el co-dueño todo menos el dinero;
+      // El dueño puede cambiarlo todo; el co-dueño lo de sus permisos (pedidos y/o pagos);
       // el amigo puede cancelar su pedido mientras no esté listo ni pagado
       allow update: if isOwner()
-        || (isCoOwner()
+        || (can('orders')
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
                  'status', 'price', 'discountPct', 'total', 'pickupTime', 'pickupPlace',
                  'adminNote', 'acceptedAt', 'deliveredAt', 'progress', 'updatesCount',
-                 'lastUpdateAt', 'stockReturned']))
+                 'lastUpdateAt', 'stockReturned', 'cancelledAt']))
+        || (can('money')
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['paid', 'paidAt']))
         || (signedIn()
             && resource.data.uid == request.auth.uid
             && resource.data.status in ['pendiente', 'aceptado']
@@ -227,9 +249,9 @@ service cloud.firestore {
       // Novedades del pedido (cómo va + fotos): las publica el equipo,
       // y solo el amigo que hizo el pedido las puede ver
       match /updates/{updateId} {
-        allow read: if isStaff()
+        allow read: if can('orders')
           || (signedIn() && resource.data.uid == request.auth.uid);
-        allow write: if isStaff();
+        allow write: if can('orders');
       }
     }
   }
