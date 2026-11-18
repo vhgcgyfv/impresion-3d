@@ -299,3 +299,10 @@ body.coowner .owner-only { display: none !important; }
 .role.owner { background: #ffe9a8; color: #7a5600; }
 .role.coowner { background: #d8f3ff; color: #075985; }
 .msg.me .role { background: rgba(255,255,255,.25); color: #fff; }
+
+/* ---------- Stock ---------- */
+.stock-ok { font-size: .78rem; font-weight: 700; color: var(--ok); }
+.stock-out { font-size: .78rem; font-weight: 700; color: var(--bad); }
+.stepper .btn:disabled, .stepper input:disabled { opacity: .4; cursor: not-allowed; }
+.stock-in { display: inline-flex; align-items: center; gap: 4px; font-size: .8rem; font-weight: 600; flex: none; }
+.stock-in input { width: 64px; }

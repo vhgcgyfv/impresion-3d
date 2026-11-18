@@ -6,7 +6,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
   getFirestore, connectFirestoreEmulator, collection, addDoc, doc, setDoc, getDoc, updateDoc, deleteDoc, writeBatch,
-  query, where, orderBy, onSnapshot, serverTimestamp, increment, limit,
+  query, where, orderBy, onSnapshot, serverTimestamp, increment, limit, runTransaction,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {
   firebaseConfig, SITE_NAME, EMAILJS, ADMIN_EMAIL, COOWNER_EMAILS, KEYCHAIN_EXTRA, PRODUCTS, PROMO_CODES, OFFERS, PICKUP_PLACES,
@@ -252,11 +252,14 @@ function start() {
       ${p.photo && PHOTO_RE.test(p.photo)
         ? `<img class="p-photo" src="${p.photo}" alt="${esc(p.name)}" data-zoom />`
         : `<div class="p-emoji">${esc(p.emoji)}</div>`}
-      <div class="p-info"><strong>${esc(p.name)}</strong><span class="muted small">${money(p.price)}</span></div>
+      <div class="p-info"><strong>${esc(p.name)}</strong><span class="muted small">${money(p.price)}</span>
+        ${stockOf(p.id) == null ? "" : stockOf(p.id) > 0
+          ? `<span class="stock-ok">✅ Quedan ${stockOf(p.id)}</span>`
+          : `<span class="stock-out">❌ Agotado</span>`}</div>
       <div class="stepper">
         <button type="button" class="btn small" data-step="-1" data-pid="${esc(p.id)}" aria-label="Quitar">−</button>
-        <input type="number" min="0" max="50" value="0" data-qty="${esc(p.id)}" aria-label="Cantidad de ${esc(p.name)}" />
-        <button type="button" class="btn small" data-step="1" data-pid="${esc(p.id)}" aria-label="Añadir">+</button>
+        <input type="number" min="0" max="${maxQty(p.id)}" value="0" data-qty="${esc(p.id)}" aria-label="Cantidad de ${esc(p.name)}" ${maxQty(p.id) ? "" : "disabled"} />
+        <button type="button" class="btn small" data-step="1" data-pid="${esc(p.id)}" aria-label="Añadir" ${maxQty(p.id) ? "" : "disabled"}>+</button>
       </div>
     </div>`).join("") : `<p class="muted small">Ahora mismo no hay productos fijos: escribe abajo lo que quieres.</p>`;
     setItems(prev);
@@ -266,12 +269,14 @@ function start() {
   const getItems = () => {
     const items = {};
     $$("[data-qty]").forEach((i) => {
-      const q = Math.max(0, Math.min(50, parseInt(i.value, 10) || 0));
+      const q = Math.max(0, Math.min(maxQty(i.dataset.qty), parseInt(i.value, 10) || 0));
       if (q) items[i.dataset.qty] = q;
     });
     return items;
   };
-  const setItems = (items) => $$("[data-qty]").forEach((i) => { i.value = items[i.dataset.qty] || 0; });
+  const setItems = (items) => $$("[data-qty]").forEach((i) => {
+    i.value = Math.min(items[i.dataset.qty] || 0, maxQty(i.dataset.qty));
+  });
 
   let codeApplied = "";
   function updateSummary() {
@@ -293,7 +298,10 @@ function start() {
     const b = e.target.closest("[data-step]");
     if (!b) return;
     const inp = $(`[data-qty="${b.dataset.pid}"]`);
-    inp.value = Math.max(0, Math.min(50, (parseInt(inp.value, 10) || 0) + Number(b.dataset.step)));
+    const max = maxQty(b.dataset.pid);
+    const next = (parseInt(inp.value, 10) || 0) + Number(b.dataset.step);
+    if (next > max && stockOf(b.dataset.pid) != null) toast(`Solo quedan ${max}.`, true);
+    inp.value = Math.max(0, Math.min(max, next));
     updateSummary();
   });
   $("#order-form").addEventListener("input", updateSummary);
@@ -301,8 +309,12 @@ function start() {
 
   offerSelect.addEventListener("change", () => {
     const o = OFFERS.find((x) => x.id === offerSelect.value);
-    if (o?.items) setItems({ ...getItems(), ...Object.fromEntries(
-      Object.entries(o.items).map(([id, q]) => [id, Math.max(q, getItems()[id] || 0)])) });
+    if (o?.items) {
+      setItems({ ...getItems(), ...Object.fromEntries(
+        Object.entries(o.items).map(([id, q]) => [id, Math.max(q, getItems()[id] || 0)])) });
+      const short = Object.entries(o.items).filter(([id, q]) => maxQty(id) < q);
+      if (short.length) toast(`No hay stock suficiente de ${short.map(([id]) => productOf(id)?.name || id).join(", ")} para la oferta.`, true);
+    }
     updateSummary();
   });
 
@@ -336,6 +348,16 @@ function start() {
     codeInput.blur();
     if (info.rickroll) rickroll(apply); else apply();
   });
+
+  // Stock en directo (stock/{producto} = { qty }). Sin documento = sin límite.
+  let stock = {};
+  function stockOf(id) { return stock[id] == null ? null : stock[id]; }
+  function maxQty(id) { return stockOf(id) == null ? 50 : Math.max(0, Math.min(50, stockOf(id))); }
+  onSnapshot(collection(db, "stock"), (snap) => {
+    stock = Object.fromEntries(snap.docs.map((d) => [d.id, Number(d.data().qty) || 0]));
+    renderProducts();
+    if (isAdmin) renderPricesEditor();
+  }, (e) => console.error(e));
 
   renderProducts();
 
@@ -592,6 +614,7 @@ function start() {
         (snap) => {
           allOrders = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
           checkNewOrders(snap);
+          returnStock();
           renderAdmin();
         },
         (e) => toast(authError(e), true),
@@ -644,7 +667,26 @@ function start() {
       return toast("Ese código no existe. Revísalo o déjalo vacío.", true);
     }
     withBusy(f.querySelector("button[type=submit]"), async () => {
-      await addDoc(collection(db, "orders"), {
+      const orderRef = doc(collection(db, "orders"));
+      await runTransaction(db, async (tx) => {
+        // 1) leer el stock de lo que se pide
+        const ids = Object.keys(items).filter((id) => stockOf(id) != null);
+        const snaps = await Promise.all(ids.map((id) => tx.get(doc(db, "stock", id))));
+        const fromStock = {};
+        snaps.forEach((s, i) => {
+          if (!s.exists()) return;
+          const id = ids[i];
+          const qty = Number(s.data().qty) || 0;
+          if (qty < items[id]) {
+            throw new Error(qty ? `Solo quedan ${qty} de ${productOf(id)?.name || id}.` : `${productOf(id)?.name || id} está agotado.`);
+          }
+          fromStock[id] = items[id];
+        });
+        // 2) restar el stock y crear el pedido a la vez
+        Object.entries(fromStock).forEach(([id, q]) => {
+          tx.update(doc(db, "stock", id), { qty: increment(-q), lastOrder: orderRef.id });
+        });
+        tx.set(orderRef, {
         uid: currentUser.uid,
         userName: (profileName || currentUser.email).slice(0, 60),
         userEmail: currentUser.email,
@@ -658,7 +700,9 @@ function start() {
           estimate: calcPrice({ items, offer: f.offer.value, keychain: f.keychain.checked, promoCode }).total,
         }),
         paid: false,
+        ...(Object.keys(fromStock).length && { fromStock }),
         createdAt: serverTimestamp(),
+      });
       });
       notifyAdminByEmail({ description, items, offer: f.offer.value, keychain: f.keychain.checked, promoCode });
       f.reset();
@@ -731,6 +775,7 @@ function start() {
   function orderTags(o) {
     const t = [];
     if (itemsText(o.items)) t.push(`<span class="tag">🧊 ${esc(itemsText(o.items))}</span>`);
+    if (o.fromStock && Object.keys(o.fromStock).length) t.push(`<span class="tag">📦 Del stock: ${esc(itemsText(o.fromStock))}</span>`);
     if (o.offer) t.push(`<span class="tag">🔥 ${esc(offerTitle(o.offer))}</span>`);
     if (o.keychain) t.push(`<span class="tag">🔑 Llavero</span>`);
     if (o.promoCode) t.push(`<span class="tag">🏷️ ${esc(o.promoCode)}${codeInfo(o.promoCode)?.discount ? ` (−${codeInfo(o.promoCode).discount}%)` : ""}</span>`);
@@ -990,7 +1035,20 @@ function start() {
           await updateDoc(ref, { status: "entregado", deliveredAt: serverTimestamp() });
           break;
         case "reopen":
-          await updateDoc(ref, { status: "aceptado" });
+          if (o.fromStock && o.stockReturned) {
+            // vuelve a coger el stock que se devolvió
+            await runTransaction(db, async (tx) => {
+              const snaps = await Promise.all(Object.keys(o.fromStock).map((id) => tx.get(doc(db, "stock", id))));
+              snaps.forEach((s, i) => {
+                const id = Object.keys(o.fromStock)[i];
+                if (s.exists() && (Number(s.data().qty) || 0) < o.fromStock[id]) throw new Error(`No queda stock de ${productOf(id)?.name || id}.`);
+              });
+              Object.entries(o.fromStock).forEach(([id, q]) => tx.set(doc(db, "stock", id), { qty: increment(-q) }, { merge: true }));
+              tx.update(ref, { status: "aceptado", stockReturned: false });
+            });
+          } else {
+            await updateDoc(ref, { status: "aceptado" });
+          }
           break;
         case "updates":
           openUpdates(o);
@@ -1000,6 +1058,7 @@ function start() {
           break;
         case "delete":
           if (!confirm("¿Borrar este pedido para siempre?")) return;
+          if (o.fromStock && !o.stockReturned && !["entregado", "listo"].includes(o.status)) await returnStockOf(o);
           await deleteDoc(ref);
           toast("Pedido borrado.");
           break;
@@ -1432,6 +1491,29 @@ function start() {
     });
   });
 
+  // ---------- Devolver stock de pedidos cancelados o rechazados ----------
+  const returning = new Set();
+  async function returnStockOf(o) {
+    if (returning.has(o.id)) return;
+    returning.add(o.id);
+    try {
+      await runTransaction(db, async (tx) => {
+        const ref = doc(db, "orders", o.id);
+        const cur = await tx.get(ref);
+        if (!cur.exists() || cur.data().stockReturned || !cur.data().fromStock) return;
+        Object.entries(cur.data().fromStock).forEach(([id, q]) => {
+          tx.set(doc(db, "stock", id), { qty: increment(Number(q) || 0) }, { merge: true });
+        });
+        tx.update(ref, { stockReturned: true });
+      });
+    } catch (e) { console.error(e); } finally { returning.delete(o.id); }
+  }
+  function returnStock() {
+    allOrders
+      .filter((o) => ["cancelado", "rechazado"].includes(o.status) && o.fromStock && !o.stockReturned)
+      .forEach(returnStockOf);
+  }
+
   // ---------- Sin filamento: cancelar todo lo que no está hecho ----------
   $("#no-filament").addEventListener("click", (e) => {
     const targets = allOrders.filter((o) => ["pendiente", "aceptado"].includes(o.status));
@@ -1469,6 +1551,7 @@ function start() {
       <input name="emoji" value="${esc(p.emoji || "")}" maxlength="8" aria-label="Emoji (si no hay foto)" class="emoji-in" ${photo ? "hidden" : ""} />
       <input name="name" value="${esc(p.name || "")}" maxlength="40" placeholder="Nombre" aria-label="Nombre" />
       <label class="euro"><input name="price" type="number" min="0" step="0.01" inputmode="decimal" value="${p.price ?? ""}" aria-label="Precio" /> €</label>
+      <label class="stock-in">📦 Stock <input name="stock" type="number" min="0" step="1" inputmode="numeric" value="${p.id && stockOf(p.id) != null ? stockOf(p.id) : ""}" placeholder="∞" aria-label="Stock" /></label>
       <input name="id" type="hidden" value="${esc(p.id || "")}" />
       <button type="button" class="btn bad small" data-del-row aria-label="Quitar producto">✕</button>
     </div>`;
@@ -1478,7 +1561,8 @@ function start() {
     $("#admin-prices").innerHTML = `
       <div class="card">
         <h3>💶 Precios</h3>
-        <p class="muted small">Los cambios se ven al momento en la web de tus amigos. Los pedidos ya aceptados mantienen su precio.</p>
+        <p class="muted small">Los cambios se ven al momento en la web de tus amigos. Los pedidos ya hechos mantienen su precio.</p>
+        <p class="muted small">📦 <strong>Stock</strong>: cuántos tienes ya hechos. Baja solo con cada pedido y vuelve si se cancela o rechaza. Déjalo vacío (∞) si lo imprimes por encargo sin límite; pon 0 para «Agotado».</p>
         <div id="price-rows" class="price-rows">${catalog.map(priceRow).join("")}</div>
         <button type="button" class="btn small" id="add-product">➕ Añadir producto</button>
         <label class="keychain-row">🔑 Suplemento versión llavero
@@ -1533,6 +1617,7 @@ function start() {
     } else if (e.target.closest("#save-prices")) {
       withBusy(e.target, async () => {
         const used = new Set();
+        const stockPlan = {};
         const products = $$("#price-rows [data-row]").map((r) => {
           const name = r.querySelector("[name=name]").value.trim();
           const price = parseFloat(r.querySelector("[name=price]").value.replace(",", "."));
@@ -1542,6 +1627,9 @@ function start() {
           while (used.has(id)) id += "-2";
           used.add(id);
           const photo = PHOTO_RE.test(r.dataset.photo || "") ? r.dataset.photo : "";
+          const st = r.querySelector("[name=stock]").value.trim();
+          if (st !== "" && !(Number.isInteger(Number(st)) && Number(st) >= 0)) throw new Error(`El stock de «${name}» tiene que ser un número entero.`);
+          stockPlan[id] = st === "" ? null : Number(st);
           return { id, name, emoji: r.querySelector("[name=emoji]").value.trim(), price: round2(price), ...(photo && { photo }) };
         });
         if (JSON.stringify(products).length > 900000) {
@@ -1550,7 +1638,15 @@ function start() {
         const k = parseFloat($("#keychain-extra").value.replace(",", "."));
         if (isNaN(k) || k < 0) throw new Error("Pon un precio válido al llavero.");
         pricesDirty = false;
-        await setDoc(doc(db, "settings", "shop"), { products, keychainExtra: round2(k), updatedAt: serverTimestamp() });
+        const b = writeBatch(db);
+        b.set(doc(db, "settings", "shop"), { products, keychainExtra: round2(k), updatedAt: serverTimestamp() });
+        // stock: poner, cambiar o quitar el límite; y borrar el de productos eliminados
+        Object.entries(stockPlan).forEach(([id, v]) => {
+          if (v == null) { if (stockOf(id) != null) b.delete(doc(db, "stock", id)); }
+          else if (v !== stockOf(id)) b.set(doc(db, "stock", id), { qty: v });
+        });
+        Object.keys(stock).filter((id) => !(id in stockPlan)).forEach((id) => b.delete(doc(db, "stock", id)));
+        await b.commit();
         toast("✅ Precios guardados.");
       });
     }

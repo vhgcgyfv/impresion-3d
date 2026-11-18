@@ -62,6 +62,22 @@ service cloud.firestore {
       allow write: if isOwner();
     }
 
+    // ---------- Stock de cada producto ----------
+    // Lo ven todos. El equipo lo cambia como quiera. Un amigo solo puede
+    // restar exactamente lo que se lleva en el pedido que crea a la vez.
+    match /stock/{pid} {
+      allow read: if true;
+      allow write: if isStaff();
+      allow update: if signedIn()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['qty', 'lastOrder'])
+        && !exists(/databases/$(database)/documents/orders/$(request.resource.data.lastOrder))
+        && getAfter(/databases/$(database)/documents/orders/$(request.resource.data.lastOrder)).data.uid == request.auth.uid
+        && request.resource.data.qty is int
+        && request.resource.data.qty >= 0
+        && request.resource.data.qty == resource.data.qty
+             - getAfter(/databases/$(database)/documents/orders/$(request.resource.data.lastOrder)).data.fromStock[pid];
+    }
+
     // ---------- Chat de cada amigo con el vendedor ----------
     match /chats/{uid} {
       allow read: if isStaff() || (signedIn() && request.auth.uid == uid);
@@ -110,7 +126,7 @@ service cloud.firestore {
       allow create: if signedIn()
         && request.resource.data.keys().hasOnly([
              'uid', 'userName', 'userEmail', 'description', 'offer',
-             'items', 'keychain', 'promoCode', 'status', 'estimate', 'paid', 'createdAt'])
+             'items', 'keychain', 'promoCode', 'status', 'estimate', 'fromStock', 'paid', 'createdAt'])
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.userEmail == request.auth.token.email
         && shortString(request.resource.data.userName, 1, 60)
@@ -125,6 +141,8 @@ service cloud.firestore {
             || (request.resource.data.estimate is number
                 && request.resource.data.estimate >= 0
                 && request.resource.data.estimate <= 1000))
+        && (!('fromStock' in request.resource.data)
+            || (request.resource.data.fromStock is map && request.resource.data.fromStock.size() <= 20))
         && request.resource.data.paid == false
         && request.resource.data.createdAt == request.time;
 
@@ -135,7 +153,7 @@ service cloud.firestore {
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
                  'status', 'price', 'discountPct', 'total', 'pickupTime', 'pickupPlace',
                  'adminNote', 'acceptedAt', 'deliveredAt', 'progress', 'updatesCount',
-                 'lastUpdateAt']))
+                 'lastUpdateAt', 'stockReturned']))
         || (signedIn()
             && resource.data.uid == request.auth.uid
             && resource.data.status in ['pendiente', 'aceptado']
