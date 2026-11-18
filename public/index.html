@@ -176,19 +176,24 @@
 
       <div id="stats" class="stats"></div>
 
+      <div class="tabs-wrap">
+        <button type="button" class="tabs-arrow" data-tabs-scroll="-1" aria-label="Pestañas anteriores">‹</button>
       <div class="tabs admin-tabs">
-        <button class="tab active" data-admin-tab="orders" data-perm="orders">Pedidos</button>
-        <button class="tab" data-admin-tab="chats" data-perm="chats">Chats<span id="chats-badge" class="nbadge hidden"></span></button>
-        <button class="tab" data-admin-tab="accounts" data-perm="money">Cuentas (pagos)</button>
-        <button class="tab" data-admin-tab="prices" data-perm="prices">Precios</button>
-        <button class="tab" data-admin-tab="offers" data-perm="offers">🔥 Ofertas</button>
-        <button class="tab" data-admin-tab="codes" id="codes-tab" data-perm="codes">🎟️ Códigos</button>
-        <button class="tab" data-admin-tab="bans" data-perm="bans">🚫 Ban</button>
-        <button class="tab owner-only" data-admin-tab="roles">👥 Roles</button>
-        <button class="tab" data-admin-tab="stats" data-perm="stats">📊 Analíticas</button>
-        <button class="tab" data-admin-tab="notices" data-perm="notices">📢 Avisos</button>
-        <button class="tab" data-admin-tab="emojis" data-perm="emojis">😀 Emojis</button>
+          <button class="tab active" data-admin-tab="orders" data-perm="orders">Pedidos</button>
+          <button class="tab" data-admin-tab="chats" data-perm="chats">Chats<span id="chats-badge" class="nbadge hidden"></span></button>
+          <button class="tab" data-admin-tab="accounts" data-perm="money">Cuentas (pagos)</button>
+          <button class="tab" data-admin-tab="prices" data-perm="prices">Precios</button>
+          <button class="tab" data-admin-tab="offers" data-perm="offers">🔥 Ofertas</button>
+          <button class="tab" data-admin-tab="codes" id="codes-tab" data-perm="codes">🎟️ Códigos</button>
+          <button class="tab" data-admin-tab="bans" data-perm="bans">🚫 Ban</button>
+          <button class="tab owner-only" data-admin-tab="roles">👥 Roles</button>
+          <button class="tab" data-admin-tab="stats" data-perm="stats">📊 Analíticas</button>
+          <button class="tab" data-admin-tab="notices" data-perm="notices">📢 Avisos</button>
+          <button class="tab" data-admin-tab="emojis" data-perm="emojis">😀 Emojis</button>
+        </div>
+        <button type="button" class="tabs-arrow" data-tabs-scroll="1" aria-label="Más pestañas">›</button>
       </div>
+      <input type="range" id="tabs-slider" class="tabs-slider" min="0" max="1000" value="0" aria-label="Deslizar las pestañas" />
 
       <div id="admin-orders" data-admin-panel="orders">
         <div class="filters">

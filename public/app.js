@@ -1257,6 +1257,33 @@ function start() {
     $$("[data-admin-tab]").forEach((x) => x.classList.toggle("active", x === b));
     $$("[data-admin-panel]").forEach((p) => show(p, p.dataset.adminPanel === b.dataset.adminTab));
   }));
+  // flechas de la barra de pestañas
+  const tabsBar = $(".admin-tabs");
+  const tabsSlider = $("#tabs-slider");
+  tabsSlider.addEventListener("input", () => {
+    tabsBar.style.scrollBehavior = "auto";
+    tabsBar.scrollLeft = (Number(tabsSlider.value) / 1000) * (tabsBar.scrollWidth - tabsBar.clientWidth);
+    tabsBar.style.scrollBehavior = "";
+  });
+  const updateTabArrows = () => {
+    const room = tabsBar.scrollWidth - tabsBar.clientWidth;
+    show(tabsSlider, room > 2);
+    if (document.activeElement !== tabsSlider) tabsSlider.value = room > 0 ? Math.round((tabsBar.scrollLeft / room) * 1000) : 0;
+    $$("[data-tabs-scroll]").forEach((b) => {
+      b.disabled = b.dataset.tabsScroll === "-1" ? tabsBar.scrollLeft <= 2
+        : tabsBar.scrollLeft + tabsBar.clientWidth >= tabsBar.scrollWidth - 2;
+    });
+  };
+  $$("[data-tabs-scroll]").forEach((b) => b.addEventListener("click", () => {
+    tabsBar.scrollBy({ left: Number(b.dataset.tabsScroll) * tabsBar.clientWidth * 0.7 });
+  }));
+  tabsBar.addEventListener("scroll", updateTabArrows, { passive: true });
+  window.addEventListener("resize", updateTabArrows);
+  $$("[data-admin-tab]").forEach((t) => t.addEventListener("click", () => {
+    t.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "nearest" });
+  }));
+  setInterval(updateTabArrows, 1000); // por si cambian las pestañas visibles (permisos)
+  updateTabArrows();
   $("#status-filter").addEventListener("change", renderAdminOrders);
   $("#search").addEventListener("input", renderAdminOrders);
 
