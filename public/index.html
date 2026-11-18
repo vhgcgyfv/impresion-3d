@@ -35,7 +35,7 @@
         <h1>Pide tus figuras en 3D</h1>
         <p>Crea tu cuenta, escribe lo que quieres y te digo precio, hora y sitio para recogerlo.</p>
         <p class="cash">💶 Solo pago en efectivo al recoger</p>
-        <div class="price-notice hidden" role="alert"></div>
+        <div class="notices" role="region" aria-label="Avisos"></div>
         <section class="value-box" aria-label="Por qué cuesta lo que cuesta"></section>
       </div>
 
@@ -88,7 +88,7 @@
 
     <!-- ============ VISTA DE AMIGO ============ -->
     <section id="client-view" class="hidden">
-      <div class="price-notice hidden" role="alert"></div>
+      <div class="notices" role="region" aria-label="Avisos"></div>
         <section class="value-box" aria-label="Por qué cuesta lo que cuesta"></section>
 
       <div id="verify-banner" class="card warn hidden">
@@ -174,6 +174,8 @@
         <button class="tab owner-only" data-admin-tab="prices">Precios</button>
         <button class="tab" data-admin-tab="codes" id="codes-tab">Códigos</button>
         <button class="tab owner-only" data-admin-tab="bans">🚫 Ban</button>
+        <button class="tab owner-only" data-admin-tab="stats">📊 Analíticas</button>
+        <button class="tab owner-only" data-admin-tab="notices">📢 Avisos</button>
       </div>
 
       <div id="admin-orders" data-admin-panel="orders">
@@ -202,6 +204,31 @@
       <div id="admin-accounts" data-admin-panel="accounts" class="hidden owner-only"></div>
       <div id="admin-prices" data-admin-panel="prices" class="hidden owner-only"></div>
       <div id="admin-codes" data-admin-panel="codes" class="hidden"></div>
+      <div id="admin-stats" data-admin-panel="stats" class="hidden owner-only">
+        <div class="filters an-filters" role="group" aria-label="Periodo">
+          <button type="button" class="chip" data-range="7">7 días</button>
+          <button type="button" class="chip active" data-range="30">30 días</button>
+          <button type="button" class="chip" data-range="90">90 días</button>
+          <button type="button" class="chip" data-range="0">Todo</button>
+        </div>
+        <div id="an-body"></div>
+      </div>
+
+      <div id="admin-notices" data-admin-panel="notices" class="hidden owner-only">
+        <div class="card">
+          <h3>📢 Avisos de la web</h3>
+          <p class="muted small">Salen arriba del todo, en la portada y en la página de pedidos. Puedes tener varios y encenderlos o apagarlos.</p>
+          <div id="notice-rows" class="notice-rows"></div>
+          <div class="actions">
+            <button type="button" class="btn small" id="add-notice">➕ Añadir aviso</button>
+          </div>
+          <div class="actions">
+            <button type="button" class="btn primary" id="save-notices">Guardar avisos</button>
+            <button type="button" class="btn ghost" id="reset-notices">Deshacer cambios</button>
+          </div>
+        </div>
+      </div>
+
       <div id="admin-bans" data-admin-panel="bans" class="hidden owner-only">
         <div class="card">
           <h3>🚫 Banear a alguien</h3>

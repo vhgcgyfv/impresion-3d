@@ -357,3 +357,58 @@ body.coowner .owner-only { display: none !important; }
 .ban-row:last-child { border-bottom: 0; }
 .ban-main { min-width: 0; overflow-wrap: anywhere; }
 .user-list { margin-top: 10px; max-height: 420px; overflow-y: auto; }
+
+/* ---------- Avisos (varios colores) ---------- */
+.notices:empty { display: none; }
+.notices { display: grid; gap: 10px; margin: 4px 0 14px; }
+.notice { border-radius: 18px; padding: 16px 18px; text-align: center; border: 3px solid; }
+.notice .pn-title { font-size: 1.5rem; font-weight: 900; line-height: 1.15; margin-bottom: 6px; text-transform: uppercase; }
+.notice .pn-text { font-size: 1.08rem; font-weight: 700; line-height: 1.4; }
+.notice-rojo { background: #e11d2e; color: #fff; border-color: #8f0010; box-shadow: 0 8px 24px rgba(225, 29, 46, .35); animation: pn-pulse 1.6s ease-in-out infinite; }
+.notice-amarillo { background: #ffe27a; color: #3d2c00; border-color: #e0a800; }
+.notice-verde { background: #19a957; color: #fff; border-color: #0b6b33; }
+.notice-azul { background: #2563eb; color: #fff; border-color: #133a91; }
+@media (prefers-reduced-motion: reduce) { .notice-rojo { animation: none; } }
+.notice-rows { display: grid; gap: 14px; margin-bottom: 10px; }
+.notice-row { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); }
+.nr-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.nr-head strong { flex: 1; }
+.nr-head select { width: auto; }
+.switch { display: inline-flex; align-items: center; gap: 6px; font-size: .9rem; font-weight: 600; }
+.switch input { width: 18px; height: 18px; }
+.nr-preview .notice { padding: 10px 12px; }
+.nr-preview .pn-title { font-size: 1.1rem; }
+.nr-preview .pn-text { font-size: .95rem; }
+
+/* ---------- Analíticas ---------- */
+.an-filters { gap: 6px; }
+.chip { border: 1px solid var(--line); background: var(--card); color: var(--text); border-radius: 999px; padding: 6px 14px; font: inherit; font-weight: 600; cursor: pointer; }
+.chip.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+.an-card h3 { font-size: 1rem; }
+.an-two { display: grid; gap: 0 16px; }
+@media (min-width: 720px) { .an-two { grid-template-columns: 1fr 1fr; } }
+.vchart { display: grid; grid-template-columns: auto 1fr; gap: 8px; height: 180px; }
+.vc-grid { display: flex; flex-direction: column; justify-content: space-between; font-size: .72rem; color: var(--muted); text-align: right; }
+.vc-bars { display: flex; align-items: flex-end; gap: 2px; border-bottom: 1px solid var(--line);
+  background: linear-gradient(var(--line), var(--line)) 0 0 / 100% 1px no-repeat, linear-gradient(var(--line), var(--line)) 0 50% / 100% 1px no-repeat; }
+.vc-col { flex: 1; height: 100%; display: flex; align-items: flex-end; cursor: default; outline-offset: 2px; min-width: 0; }
+.vc-bar { width: 100%; max-width: 28px; margin: 0 auto; background: var(--primary); border-radius: 4px 4px 0 0; }
+.vc-col:hover .vc-bar, .vc-col:focus .vc-bar { background: var(--primary-2); }
+.vc-ticks { position: relative; height: 18px; margin-left: 30px; font-size: .72rem; color: var(--muted); }
+.vc-ticks span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
+.hbars { display: grid; gap: 8px; }
+.hbar { display: grid; grid-template-columns: minmax(70px, 34%) 1fr auto; align-items: center; gap: 8px; font-size: .88rem; outline-offset: 2px; }
+.hb-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hb-track { height: 12px; }
+.hb-fill { display: block; height: 100%; background: var(--primary); border-radius: 0 4px 4px 0; }
+.hbar:hover .hb-fill, .hbar:focus .hb-fill { background: var(--primary-2); }
+.hb-val { font-weight: 700; font-variant-numeric: tabular-nums; }
+.an-status { display: flex; flex-wrap: wrap; gap: 6px; }
+.an-table { margin-top: 8px; }
+.an-table table { margin-top: 6px; }
+.an-tip { position: fixed; z-index: 120; background: var(--text); color: var(--bg); font-size: .82rem; font-weight: 600; padding: 6px 10px; border-radius: 8px; pointer-events: none; max-width: 240px; }
+
+/* ---------- Pestañas del panel: se deslizan de lado en el móvil ---------- */
+.admin-tabs { overflow-x: auto; scrollbar-width: none; }
+.admin-tabs::-webkit-scrollbar { display: none; }
+.admin-tabs .tab { flex: 0 0 auto; white-space: nowrap; padding: 8px 12px; }
