@@ -205,7 +205,21 @@ td.num, th.num { text-align: right; }
 .rick { position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,.85); display: grid; place-items: center; padding: 16px; }
 .rick-box { width: min(560px, 100%); display: grid; gap: 12px; text-align: center; color: #fff; }
 .rick-frame { aspect-ratio: 16 / 9; background: #000; border-radius: 12px; overflow: hidden; }
-.rick-frame iframe { width: 100%; height: 100%; pointer-events: none; }
+.rick-stage { position: relative; aspect-ratio: 16 / 9; border-radius: 12px; overflow: hidden; background: #000; }
+.rick-stage .rick-frame { position: absolute; inset: 0; aspect-ratio: auto; border-radius: 0; }
+/* el vídeo es más alto que el hueco: así no se ve la barra con el título */
+.rick-frame iframe, .rick-frame #rick-player { position: absolute; left: 0; top: -70px; width: 100%; height: calc(100% + 140px); display: block; }
+/* el regalo tapa la portada; deja pasar los toques al vídeo (iPhone) */
+.rick-cover { position: absolute; inset: 0; display: grid; place-items: center; align-content: center; gap: 8px; pointer-events: none;
+  background: radial-gradient(circle at 50% 40%, #8f73ff, #3b1f9e 70%); transition: opacity .35s ease, transform .35s ease; }
+.rick-cover.open { opacity: 0; transform: scale(1.15); }
+.gift { font-size: 4.5rem; animation: gift-shake 1s ease-in-out infinite; }
+.gift-txt { font-weight: 800; font-size: 1.1rem; }
+@keyframes gift-shake { 0%, 100% { transform: rotate(0); } 20% { transform: rotate(-12deg) scale(1.05); } 40% { transform: rotate(10deg); } 60% { transform: rotate(-6deg); } 80% { transform: rotate(4deg); } }
+@media (prefers-reduced-motion: reduce) { .gift { animation: none; } }
+.rick-hint { font-weight: 800; font-size: 1.1rem; background: #fff; color: #111; border-radius: 999px; padding: 8px 16px; justify-self: center; animation: rick-pulse 1s ease-in-out infinite; }
+@keyframes rick-pulse { 50% { transform: scale(1.06); } }
+@media (prefers-reduced-motion: reduce) { .rick-hint { animation: none; } }
 .rick-count { font-weight: 800; font-size: 1.2rem; }
 
 /* ---------- Editor de precios ---------- */
@@ -263,3 +277,46 @@ input[type=range] { padding: 0; accent-color: var(--primary); }
 .p-pick { position: relative; width: 48px; height: 48px; flex: none; padding: 0; border: 1px dashed var(--line); border-radius: 10px; background: var(--bg); cursor: pointer; display: grid; place-items: center; font-size: 1.2rem; }
 .p-pick img { width: 100%; height: 100%; object-fit: cover; border-radius: 9px; }
 .p-pick .p-rm { position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; border-radius: 50%; background: var(--bad); color: #fff; font-size: .7rem; display: grid; place-items: center; }
+
+/* ---------- Chat ---------- */
+.nbadge { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; margin-left: 5px; border-radius: 999px; background: var(--bad); color: #fff; font-size: .72rem; font-weight: 800; }
+.chat-card { padding: 0; overflow: hidden; display: flex; flex-direction: column; }
+.chat-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+.chat-head .who { font-weight: 700; }
+.chat-msgs { height: min(60vh, 520px); overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 8px; background: var(--bg); }
+.msg { max-width: 82%; padding: 8px 12px; border-radius: 16px; display: grid; gap: 6px; word-break: break-word; white-space: pre-wrap; }
+.msg.them { align-self: flex-start; background: var(--card); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
+.msg.me { align-self: flex-end; background: var(--primary); color: #fff; border-bottom-right-radius: 4px; }
+.msg .t { font-size: .7rem; opacity: .7; justify-self: end; }
+.msg .photos { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); min-width: 180px; }
+.chat-form { display: flex; gap: 8px; align-items: flex-end; padding: 10px; border-top: 1px solid var(--line); }
+.chat-form textarea { resize: none; min-height: 42px; max-height: 120px; }
+.chat-form .btn { flex: none; height: 42px; }
+.chat-previews { padding: 0 10px; }
+.chat-previews:not(:empty) { padding: 10px 10px 0; }
+.chat-empty { margin: auto; text-align: center; color: var(--muted); }
+.chats-layout { display: grid; gap: 12px; }
+.chat-list { display: grid; gap: 8px; }
+.chat-item { display: flex; gap: 10px; align-items: center; text-align: left; width: 100%; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; cursor: pointer; font: inherit; color: var(--text); }
+.chat-item.active { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary-2) inset; }
+.chat-item .ci-main { flex: 1; min-width: 0; }
+.chat-item .ci-last { color: var(--muted); font-size: .85rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-item .ci-time { font-size: .75rem; color: var(--muted); }
+.avatar { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; background: var(--primary); color: #fff; font-weight: 800; flex: none; }
+@media (min-width: 760px) {
+  .chats-layout { grid-template-columns: 280px 1fr; align-items: start; }
+}
+
+/* ---------- Co-dueño: oculta lo que solo puede hacer el dueño ---------- */
+body.coowner .owner-only { display: none !important; }
+.role { font-size: .7rem; font-weight: 800; padding: 2px 8px; border-radius: 999px; justify-self: start; }
+.role.owner { background: #ffe9a8; color: #7a5600; }
+.role.coowner { background: #d8f3ff; color: #075985; }
+.msg.me .role { background: rgba(255,255,255,.25); color: #fff; }
+
+/* ---------- Stock ---------- */
+.stock-ok { font-size: .78rem; font-weight: 700; color: var(--ok); }
+.stock-out { font-size: .78rem; font-weight: 700; color: var(--bad); }
+.stepper .btn:disabled, .stepper input:disabled { opacity: .4; cursor: not-allowed; }
+.stock-in { display: inline-flex; align-items: center; gap: 4px; font-size: .8rem; font-weight: 600; flex: none; }
+.stock-in input { width: 64px; }

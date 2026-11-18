@@ -6,14 +6,17 @@ Web para que tus amigos te pidan impresiones 3D:
 - **Pedidos**: eligen productos con precio fijo (**Fennec 0,50 €**, **Balón 0,25 €**), escriben detalles en un cuadro de texto, pueden elegir una **oferta**, la **versión llavero (+0,10 €)** y un **código de apoyo**. Ven el total aproximado al momento.
 - **Código `manchis14`**: al escribirlo sale una sorpresa de 5 segundos 🎵 y luego se aplica un **10 % de descuento**.
 - **Solo pago en efectivo.**
+- **Co-dueño** (`martincsurcui@gmail.com`): gestiona pedidos (aceptar, precio, hora, lugar, estado, «cómo va») y contesta chats con la etiqueta «🤝 Co-dueño». No puede tocar pagos, precios, borrar pedidos ni usar «sin filamento». Se cambia en `COOWNER_EMAILS` (`public/config.js`) **y** en `firestore.rules`.
 - **Panel de admin** (solo `o39459309@gmail.com`):
-  - Aceptar / rechazar pedidos poniendo **precio, hora y lugar de recogida** (y una nota opcional).
+  - Los pedidos **entran ya aceptados** con el precio calculado. Tú (o el co-dueño) pones **hora y lugar de recogida**, puedes ajustar el precio y **rechazarlos**. El cliente puede cancelar el suyo mientras no esté listo ni pagado.
   - Marcar pedidos como *listo* / *entregado*.
   - **Cuentas**: quién te ha pagado y quién te debe (y cuánto), con un botón para marcar pagado.
   - **Códigos**: cuánta gente ha usado `manchis14`.
   - **Avisos de pedidos nuevos**: te llega un **correo** con cada pedido (con EmailJS) y, con el panel abierto, **suena** y sale una **notificación** (botón «Activar avisos»).
   - **Contar cómo va**: en cada pedido aceptado, publica un texto, el % de progreso y hasta 4 fotos. Solo lo ve el dueño del pedido.
+  - **Chats**: cada amigo tiene su chat privado contigo (botón «💬 Chat»). Tú los ves todos en la pestaña Chats y puedes mandar fotos. Avisa con sonido/notificación y contador de no leídos.
   - **Sin filamento**: un botón que cancela de golpe todos los pedidos pendientes y aceptados que aún no has marcado como listos (tus amigos ven el aviso).
+  - **Stock**: en Precios, cuántas unidades tienes hechas de cada producto (vacío = sin límite, 0 = agotado). Baja solo con cada pedido y vuelve al momento si se cancela o rechaza.
   - **Precios**: cambia el precio de cada producto y del llavero, añade o quita productos. Tus amigos ven los precios nuevos al momento.
 - Ofertas incluidas: **2 Fennecs + balón GRATIS**.
 

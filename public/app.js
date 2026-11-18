@@ -6,10 +6,10 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
   getFirestore, connectFirestoreEmulator, collection, addDoc, doc, setDoc, getDoc, updateDoc, deleteDoc, writeBatch,
-  query, where, orderBy, onSnapshot, serverTimestamp, increment,
+  query, where, orderBy, onSnapshot, serverTimestamp, increment, limit, runTransaction,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {
-  firebaseConfig, SITE_NAME, EMAILJS, ADMIN_EMAIL, KEYCHAIN_EXTRA, PRODUCTS, PROMO_CODES, OFFERS, PICKUP_PLACES,
+  firebaseConfig, SITE_NAME, EMAILJS, ADMIN_EMAIL, COOWNER_EMAILS, KEYCHAIN_EXTRA, PRODUCTS, PROMO_CODES, OFFERS, PICKUP_PLACES,
 } from "./config.js";
 
 // ---------------------------------------------------------------- utilidades
@@ -130,25 +130,98 @@ function updatesHtml(list, { admin = false, orderId = "" } = {}) {
 }
 
 // ---------------------------------------------------------------- rickroll
+// Carga la API oficial de YouTube una sola vez
+let ytApi = null;
+function loadYouTubeApi() {
+  if (window.YT?.Player) return Promise.resolve(window.YT);
+  ytApi ||= new Promise((resolve, reject) => {
+    const prev = window.onYouTubeIframeAPIReady;
+    window.onYouTubeIframeAPIReady = () => { prev?.(); resolve(window.YT); };
+    const s = document.createElement("script");
+    s.src = "https://www.youtube.com/iframe_api";
+    s.onerror = () => { ytApi = null; reject(new Error("YouTube no carga")); };
+    document.head.appendChild(s);
+  });
+  return ytApi;
+}
+
+const RICK_ID = "dQw4w9WgXcQ";
+const RICK_START = 43;    // segundo donde empieza el estribillo
+const RICK_SECONDS = 5;   // cuánto suena
+const RICK_MAX_WAIT = 30; // si no llega a sonar (anuncio largo, sin red…), se aplica igual
+
 function rickroll(onDone) {
   const ov = $("#rick");
   const frame = $("#rick-frame");
   const count = $("#rick-count");
-  frame.innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?autoplay=1&controls=0&modestbranding=1&rel=0"
-    allow="autoplay; encrypted-media" title="Sorpresa" frameborder="0"></iframe>`;
+  const msg = $("#rick-msg");
+  const hint = $("#rick-hint");
+  const cover = $("#rick-cover");
+  frame.innerHTML = `<div id="rick-player"></div>`;
+  msg.textContent = "Abriendo tu regalo…";
+  cover.classList.remove("open");
+  show(hint, false);
   show(ov);
-  let left = 5;
-  count.textContent = left;
-  const t = setInterval(() => {
-    left--;
-    count.textContent = left;
-    if (left <= 0) {
-      clearInterval(t);
-      frame.innerHTML = "";
-      show(ov, false);
-      onDone?.();
-    }
-  }, 1000);
+
+  let player = null;
+  let finished = false;
+  let countdown = null;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    clearInterval(countdown);
+    clearTimeout(hintTimer);
+    clearTimeout(maxTimer);
+    try { player?.destroy(); } catch { /* ignorar */ }
+    frame.innerHTML = "";
+    show(ov, false);
+    onDone?.();
+  };
+  // La cuenta atrás empieza cuando de verdad suena la canción (no durante un anuncio)
+  const startCountdown = () => {
+    if (countdown || finished) return;
+    show(hint, false);
+    cover.classList.add("open"); // ¡sorpresa!
+    let left = RICK_SECONDS;
+    msg.innerHTML = `😂 ¡Te la he colado! Tu descuento llega en <span id="rick-count">${left}</span>…`;
+    countdown = setInterval(() => {
+      left--;
+      const c = $("#rick-count");
+      if (c) c.textContent = left;
+      if (left <= 0) finish();
+    }, 1000);
+  };
+  // En iPhone Safari no deja sonar sin tocar: avisar
+  const hintTimer = setTimeout(() => { if (!countdown) show(hint); }, 3500);
+  const maxTimer = setTimeout(finish, RICK_MAX_WAIT * 1000);
+
+  loadYouTubeApi().then((YT) => {
+    if (finished) return;
+    player = new YT.Player("rick-player", {
+      host: "https://www.youtube-nocookie.com",
+      videoId: RICK_ID,
+      playerVars: {
+        autoplay: 1, start: RICK_START, controls: 0, disablekb: 1, fs: 0,
+        modestbranding: 1, playsinline: 1, rel: 0, iv_load_policy: 3,
+      },
+      events: {
+        onReady: (e) => { e.target.unMute(); e.target.setVolume(100); e.target.playVideo(); },
+        onStateChange: (e) => {
+          // Solo cuenta si ya está en el estribillo (un anuncio empieza en 0)
+          if (e.data === YT.PlayerState.PLAYING && e.target.getCurrentTime() >= RICK_START - 1) startCountdown();
+          else if (e.data === YT.PlayerState.PLAYING) {
+            const check = setInterval(() => {
+              if (finished) return clearInterval(check);
+              try {
+                if (e.target.getCurrentTime() >= RICK_START - 1) { clearInterval(check); startCountdown(); }
+              } catch { clearInterval(check); }
+            }, 300);
+          }
+        },
+        onError: () => setTimeout(finish, 1500),
+      },
+    });
+  }).catch(() => setTimeout(finish, 2000));
 }
 
 const STATUS = {
@@ -162,6 +235,14 @@ const STATUS = {
 const BILLABLE = ["aceptado", "listo", "entregado"];
 const CODES_ON = Boolean(EMAILJS?.serviceId && EMAILJS?.templateId && EMAILJS?.publicKey);
 const USERNAME_RE = /^[A-Za-z0-9_.]{3,20}$/;
+// "owner" = dueño, "coowner" = co-dueño, null = amigo
+const roleOfEmail = (email) => {
+  const e = (email || "").toLowerCase();
+  if (e === ADMIN_EMAIL.toLowerCase()) return "owner";
+  if ((COOWNER_EMAILS || []).some((x) => x.toLowerCase() === e)) return "coowner";
+  return null;
+};
+const ROLE_LABEL = { owner: "👑 Dueño", coowner: "🤝 Co-dueño" };
 
 let toastTimer;
 function toast(msg, isError = false) {
@@ -219,7 +300,8 @@ function start() {
 
   let currentUser = null;
   let profileName = "";
-  let isAdmin = false;
+  let isAdmin = false; // dueño o co-dueño (verificado)
+  let myRole = null;  // "owner" | "coowner" | null
   let unsubs = [];
   let myOrders = [];
   let allOrders = [];
@@ -243,11 +325,14 @@ function start() {
       ${p.photo && PHOTO_RE.test(p.photo)
         ? `<img class="p-photo" src="${p.photo}" alt="${esc(p.name)}" data-zoom />`
         : `<div class="p-emoji">${esc(p.emoji)}</div>`}
-      <div class="p-info"><strong>${esc(p.name)}</strong><span class="muted small">${money(p.price)}</span></div>
+      <div class="p-info"><strong>${esc(p.name)}</strong><span class="muted small">${money(p.price)}</span>
+        ${stockOf(p.id) == null ? "" : stockOf(p.id) > 0
+          ? `<span class="stock-ok">✅ Quedan ${stockOf(p.id)}</span>`
+          : `<span class="stock-out">❌ Agotado</span>`}</div>
       <div class="stepper">
         <button type="button" class="btn small" data-step="-1" data-pid="${esc(p.id)}" aria-label="Quitar">−</button>
-        <input type="number" min="0" max="50" value="0" data-qty="${esc(p.id)}" aria-label="Cantidad de ${esc(p.name)}" />
-        <button type="button" class="btn small" data-step="1" data-pid="${esc(p.id)}" aria-label="Añadir">+</button>
+        <input type="number" min="0" max="${maxQty(p.id)}" value="0" data-qty="${esc(p.id)}" aria-label="Cantidad de ${esc(p.name)}" ${maxQty(p.id) ? "" : "disabled"} />
+        <button type="button" class="btn small" data-step="1" data-pid="${esc(p.id)}" aria-label="Añadir" ${maxQty(p.id) ? "" : "disabled"}>+</button>
       </div>
     </div>`).join("") : `<p class="muted small">Ahora mismo no hay productos fijos: escribe abajo lo que quieres.</p>`;
     setItems(prev);
@@ -257,12 +342,14 @@ function start() {
   const getItems = () => {
     const items = {};
     $$("[data-qty]").forEach((i) => {
-      const q = Math.max(0, Math.min(50, parseInt(i.value, 10) || 0));
+      const q = Math.max(0, Math.min(maxQty(i.dataset.qty), parseInt(i.value, 10) || 0));
       if (q) items[i.dataset.qty] = q;
     });
     return items;
   };
-  const setItems = (items) => $$("[data-qty]").forEach((i) => { i.value = items[i.dataset.qty] || 0; });
+  const setItems = (items) => $$("[data-qty]").forEach((i) => {
+    i.value = Math.min(items[i.dataset.qty] || 0, maxQty(i.dataset.qty));
+  });
 
   let codeApplied = "";
   function updateSummary() {
@@ -284,7 +371,10 @@ function start() {
     const b = e.target.closest("[data-step]");
     if (!b) return;
     const inp = $(`[data-qty="${b.dataset.pid}"]`);
-    inp.value = Math.max(0, Math.min(50, (parseInt(inp.value, 10) || 0) + Number(b.dataset.step)));
+    const max = maxQty(b.dataset.pid);
+    const next = (parseInt(inp.value, 10) || 0) + Number(b.dataset.step);
+    if (next > max && stockOf(b.dataset.pid) != null) toast(`Solo quedan ${max}.`, true);
+    inp.value = Math.max(0, Math.min(max, next));
     updateSummary();
   });
   $("#order-form").addEventListener("input", updateSummary);
@@ -292,8 +382,12 @@ function start() {
 
   offerSelect.addEventListener("change", () => {
     const o = OFFERS.find((x) => x.id === offerSelect.value);
-    if (o?.items) setItems({ ...getItems(), ...Object.fromEntries(
-      Object.entries(o.items).map(([id, q]) => [id, Math.max(q, getItems()[id] || 0)])) });
+    if (o?.items) {
+      setItems({ ...getItems(), ...Object.fromEntries(
+        Object.entries(o.items).map(([id, q]) => [id, Math.max(q, getItems()[id] || 0)])) });
+      const short = Object.entries(o.items).filter(([id, q]) => maxQty(id) < q);
+      if (short.length) toast(`No hay stock suficiente de ${short.map(([id]) => productOf(id)?.name || id).join(", ")} para la oferta.`, true);
+    }
     updateSummary();
   });
 
@@ -327,6 +421,16 @@ function start() {
     codeInput.blur();
     if (info.rickroll) rickroll(apply); else apply();
   });
+
+  // Stock en directo (stock/{producto} = { qty }). Sin documento = sin límite.
+  let stock = {};
+  function stockOf(id) { return stock[id] == null ? null : stock[id]; }
+  function maxQty(id) { return stockOf(id) == null ? 50 : Math.max(0, Math.min(50, stockOf(id))); }
+  onSnapshot(collection(db, "stock"), (snap) => {
+    stock = Object.fromEntries(snap.docs.map((d) => [d.id, Number(d.data().qty) || 0]));
+    renderProducts();
+    if (isAdmin) renderPricesEditor();
+  }, (e) => console.error(e));
 
   renderProducts();
 
@@ -408,7 +512,7 @@ function start() {
       await updateProfile(cred.user, { displayName: p.username });
       // Firebase solo marca el correo como verificado con su enlace: hace falta
       // para el admin siempre, y para todos si no hay códigos configurados.
-      if (!CODES_ON || cred.user.email.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
+      if (!CODES_ON || roleOfEmail(cred.user.email)) {
         await sendEmailVerification(cred.user);
       }
       renderHeader();
@@ -491,14 +595,21 @@ function start() {
   }
 
   // ---------- Navegación ----------
+  let currentView = "";
   function setView(view) {
+    currentView = view;
     show($("#client-view"), view === "client");
     show($("#admin-view"), view === "admin");
+    show($("#chat-view"), view === "chat");
     $("#nav-client").classList.toggle("active", view === "client");
     $("#nav-admin").classList.toggle("active", view === "admin");
+    $("#nav-chat").classList.toggle("active", view === "chat");
+    if (view === "chat") openUserChat();
+    else if (userChatPanel) { userChatPanel.close(); userChatPanel = null; }
   }
   $("#nav-client").addEventListener("click", () => setView("client"));
   $("#nav-admin").addEventListener("click", () => setView("admin"));
+  $("#nav-chat").addEventListener("click", () => setView("chat"));
 
   function renderHeader() {
     $("#nav-user").textContent = profileName || currentUser?.email || "";
@@ -512,6 +623,13 @@ function start() {
     Object.values(updUnsubs).forEach((u) => u());
     updUnsubs = {};
     updatesCache = {};
+    userChatPanel?.close();
+    userChatPanel = null;
+    adminChatPanel?.close();
+    adminChatPanel = null;
+    myChat = null;
+    allChats = [];
+    firstChatsLoad = true;
     currentUser = user;
     show($("#loading"), false);
 
@@ -529,11 +647,16 @@ function start() {
     show($("#auth-view"), false);
     show($("#nav"));
 
-    const emailIsAdmin = user.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+    const emailRole = roleOfEmail(user.email);
+    const emailIsAdmin = Boolean(emailRole);
     isAdmin = emailIsAdmin && user.emailVerified;
+    myRole = isAdmin ? emailRole : null;
+    document.body.classList.toggle("coowner", myRole === "coowner");
+    $("#admin-title").textContent = myRole === "coowner" ? "🤝 Panel de co-dueño" : "🛠️ Panel de administrador";
     show($("#verify-banner"), (emailIsAdmin || !CODES_ON) && !user.emailVerified);
     $("#verify-why").textContent = emailIsAdmin ? "para activar el panel de administrador" : "para poder hacer pedidos";
     show($("#nav-admin"), isAdmin);
+    show($("#nav-chat"), !emailIsAdmin);
 
     if (registering) {
       // createAccount se encarga del perfil
@@ -564,15 +687,41 @@ function start() {
         (snap) => {
           allOrders = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
           checkNewOrders(snap);
+          returnStock();
           renderAdmin();
         },
         (e) => toast(authError(e), true),
       ));
+      unsubs.push(onSnapshot(
+        query(collection(db, "chats"), orderBy("lastAt", "desc")),
+        (snap) => {
+          allChats = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          checkNewChatMessages(snap);
+          renderChatList();
+        },
+        (e) => console.error(e),
+      ));
       setView("admin");
     } else {
+      let prevUnread = null;
+      unsubs.push(onSnapshot(doc(db, "chats", user.uid), (snap) => {
+        myChat = snap.exists() ? snap.data() : null;
+        const unread = myChat?.unreadUser || 0;
+        $("#chat-badge").textContent = unread;
+        show($("#chat-badge"), unread > 0 && currentView !== "chat");
+        if (prevUnread !== null && unread > prevUnread && currentView !== "chat") {
+          toast("💬 Tienes un mensaje nuevo del vendedor");
+        }
+        prevUnread = unread;
+        if (currentView === "chat") markRead();
+      }, (e) => console.error(e)));
       setView("client");
     }
   });
+
+  // Precio del pedido: el que puso el equipo o, si no, el calculado al pedir
+  const orderTotal = (o) => o.total ?? o.estimate ?? 0;
+  const hasPrice = (o) => o.total != null || o.estimate != null;
 
   // ---------- Crear pedido ----------
   $("#order-form").addEventListener("submit", (e) => {
@@ -591,7 +740,28 @@ function start() {
       return toast("Ese código no existe. Revísalo o déjalo vacío.", true);
     }
     withBusy(f.querySelector("button[type=submit]"), async () => {
-      await addDoc(collection(db, "orders"), {
+      const orderRef = doc(collection(db, "orders"));
+      await runTransaction(db, async (tx) => {
+        // 1) leer el stock de lo que se pide
+        const ids = Object.keys(items).filter((id) => stockOf(id) != null);
+        const snaps = await Promise.all(ids.map((id) => tx.get(doc(db, "stock", id))));
+        const fromStock = {};
+        snaps.forEach((s, i) => {
+          if (!s.exists()) return;
+          const id = ids[i];
+          const qty = Number(s.data().qty) || 0;
+          if (qty < items[id]) {
+            throw new Error(qty ? `Solo quedan ${qty} de ${productOf(id)?.name || id}.` : `${productOf(id)?.name || id} está agotado.`);
+          }
+          fromStock[id] = items[id];
+        });
+        // 2) restar el stock y crear el pedido a la vez
+        Object.entries(fromStock).forEach(([id, q]) => {
+          tx.update(doc(db, "stock", id), { qty: increment(-q), lastOrder: orderRef.id });
+          // reserva: prueba de lo que este pedido ha sacado del stock
+          tx.set(doc(db, "stock", id, "holds", orderRef.id), { uid: currentUser.uid, qty: q });
+        });
+        tx.set(orderRef, {
         uid: currentUser.uid,
         userName: (profileName || currentUser.email).slice(0, 60),
         userEmail: currentUser.email,
@@ -600,16 +770,21 @@ function start() {
         offer: f.offer.value,
         keychain: f.keychain.checked,
         promoCode,
-        status: "pendiente",
+        status: "aceptado",
+        ...(Object.keys(items).length && {
+          estimate: calcPrice({ items, offer: f.offer.value, keychain: f.keychain.checked, promoCode }).total,
+        }),
         paid: false,
+        ...(Object.keys(fromStock).length && { fromStock }),
         createdAt: serverTimestamp(),
+      });
       });
       notifyAdminByEmail({ description, items, offer: f.offer.value, keychain: f.keychain.checked, promoCode });
       f.reset();
       codeApplied = "";
       codeMsg.textContent = "";
       updateSummary();
-      toast("¡Pedido enviado! Te avisaré aquí cuando lo acepte.");
+      toast("✅ ¡Pedido hecho! Te diré aquí la hora y el sitio para recogerlo.");
     });
   });
 
@@ -675,6 +850,7 @@ function start() {
   function orderTags(o) {
     const t = [];
     if (itemsText(o.items)) t.push(`<span class="tag">🧊 ${esc(itemsText(o.items))}</span>`);
+    if (o.fromStock && Object.keys(o.fromStock).length) t.push(`<span class="tag">📦 Del stock: ${esc(itemsText(o.fromStock))}</span>`);
     if (o.offer) t.push(`<span class="tag">🔥 ${esc(offerTitle(o.offer))}</span>`);
     if (o.keychain) t.push(`<span class="tag">🔑 Llavero</span>`);
     if (o.promoCode) t.push(`<span class="tag">🏷️ ${esc(o.promoCode)}${codeInfo(o.promoCode)?.discount ? ` (−${codeInfo(o.promoCode).discount}%)` : ""}</span>`);
@@ -685,16 +861,19 @@ function start() {
     if (!BILLABLE.includes(o.status)) return "";
     return o.paid
       ? `<span class="badge paid">💶 Pagado</span>`
-      : `<span class="badge owes">💶 Pendiente de pago: ${money(o.total)}</span>`;
+      : `<span class="badge owes">💶 Pendiente de pago: ${hasPrice(o) ? money(orderTotal(o)) : "precio por decidir"}</span>`;
   }
 
   function pickupBox(o) {
     if (!BILLABLE.includes(o.status)) return "";
+    const c = o.price != null ? calcPrice(o, o.price) : hasPrice(o) ? calcPrice(o) : null;
     return `<div class="pickup">
-      ${breakdownHtml(calcPrice(o, o.price ?? 0), { showSubtotal: false })}
-      <div>Precio: <strong>${money(o.total)}</strong> <span class="small">(en efectivo)</span></div>
-      <div>🕒 Recogida: <strong>${esc(fmtPickup(o.pickupTime))}</strong></div>
-      <div>📍 Lugar: <strong>${esc(o.pickupPlace)}</strong></div>
+      ${c ? breakdownHtml(c, { showSubtotal: o.price == null }) : ""}
+      <div>Precio: <strong>${hasPrice(o) ? money(orderTotal(o)) : "por decidir"}</strong> <span class="small">(en efectivo)</span></div>
+      ${o.pickupPlace || o.pickupTime ? `
+        <div>🕒 Recogida: <strong>${o.pickupTime ? esc(fmtPickup(o.pickupTime)) : "te lo digo pronto"}</strong></div>
+        <div>📍 Lugar: <strong>${o.pickupPlace ? esc(o.pickupPlace) : "te lo digo pronto"}</strong></div>`
+        : `<div>🕒📍 <strong>La hora y el sitio de recogida te los digo pronto.</strong></div>`}
     </div>`;
   }
 
@@ -719,7 +898,7 @@ function start() {
         ${progressHtml(o)}
         ${o.adminNote ? `<div class="note">💬 ${esc(o.adminNote)}</div>` : ""}
         ${updatesCache[o.id]?.length ? `<div class="updates-title">📸 Cómo va</div><div class="updates">${updatesHtml(updatesCache[o.id])}</div>` : ""}
-        ${o.status === "pendiente" ? `<div class="actions"><button class="btn bad small" data-cancel="${o.id}">Cancelar pedido</button></div>` : ""}
+        ${["pendiente", "aceptado"].includes(o.status) && !o.paid ? `<div class="actions"><button class="btn bad small" data-cancel="${o.id}">Cancelar pedido</button></div>` : ""}
       </div>`).join("");
   }
 
@@ -727,7 +906,17 @@ function start() {
     const id = e.target.closest("[data-cancel]")?.dataset.cancel;
     if (!id || !confirm("¿Seguro que quieres cancelar este pedido?")) return;
     withBusy(e.target, async () => {
-      await updateDoc(doc(db, "orders", id), { status: "cancelado" });
+      const o = myOrders.find((x) => x.id === id);
+      await runTransaction(db, async (tx) => {
+        const ids = Object.keys(o?.fromStock || {});
+        const holds = await Promise.all(ids.map((pid) => tx.get(doc(db, "stock", pid, "holds", id))));
+        holds.forEach((h, i) => {
+          if (!h.exists()) return;
+          tx.update(doc(db, "stock", ids[i]), { qty: increment(Number(h.data().qty) || 0), lastOrder: id });
+          tx.delete(h.ref);
+        });
+        tx.update(doc(db, "orders", id), { status: "cancelado", ...(ids.length && { stockReturned: true }) });
+      });
       toast("Pedido cancelado.");
     });
   });
@@ -751,16 +940,17 @@ function start() {
 
   function renderStats() {
     const billable = allOrders.filter((o) => BILLABLE.includes(o.status));
-    const cobrado = billable.filter((o) => o.paid).reduce((s, o) => s + (o.total || 0), 0);
-    const debe = billable.filter((o) => !o.paid).reduce((s, o) => s + (o.total || 0), 0);
-    const pend = allOrders.filter((o) => o.status === "pendiente").length;
+    const cobrado = billable.filter((o) => o.paid).reduce((s, o) => s + orderTotal(o), 0);
+    const debe = billable.filter((o) => !o.paid).reduce((s, o) => s + orderTotal(o), 0);
+    const pend = allOrders.filter((o) => o.status === "pendiente"
+      || (o.status === "aceptado" && !o.pickupPlace)).length;
     const codeUses = allOrders.filter((o) => o.promoCode === CODE_LIST[0] && !["cancelado"].includes(o.status));
     const codePeople = new Set(codeUses.map((o) => o.uid)).size;
     $("#stats").innerHTML = `
-      <div class="stat"><div class="n">${pend}</div><div class="l">Pedidos pendientes</div></div>
-      <div class="stat"><div class="n">${allOrders.filter((o) => ["aceptado", "listo"].includes(o.status)).length}</div><div class="l">Aceptados / listos</div></div>
-      <div class="stat"><div class="n">${money(cobrado)}</div><div class="l">Cobrado</div></div>
-      <div class="stat"><div class="n">${money(debe)}</div><div class="l">Te deben</div></div>
+      <div class="stat"><div class="n">${pend}</div><div class="l">Nuevos (sin hora ni sitio)</div></div>
+      <div class="stat"><div class="n">${allOrders.filter((o) => ["aceptado", "listo"].includes(o.status)).length}</div><div class="l">En marcha / listos</div></div>
+      <div class="stat owner-only"><div class="n">${money(cobrado)}</div><div class="l">Cobrado</div></div>
+      <div class="stat owner-only"><div class="n">${money(debe)}</div><div class="l">Te deben</div></div>
       ${CODE_LIST.length ? `<div class="stat hl"><div class="n">${codePeople}</div><div class="l">Personas con «${esc(CODE_LIST[0])}» (${codeUses.length} pedidos)</div></div>` : ""}`;
   }
 
@@ -836,17 +1026,19 @@ function start() {
         ${isPending ? priceForm(o, false) : ""}
         ${billable ? `
           <div class="actions">
-            <button class="btn small ${o.paid ? "" : "ok"}" data-act="paid" data-id="${o.id}">
+            <button class="btn small owner-only ${o.paid ? "" : "ok"}" data-act="paid" data-id="${o.id}">
               ${o.paid ? "↩️ Marcar como NO pagado" : "💶 Marcar como pagado"}</button>
             ${o.status === "aceptado" ? `<button class="btn small" data-act="ready" data-id="${o.id}">📦 Marcar listo</button>` : ""}
+            ${["aceptado", "listo"].includes(o.status) && !o.paid ? `<button class="btn bad small" data-act="reject" data-id="${o.id}">✖ Rechazar</button>` : ""}
             ${o.status !== "entregado" ? `<button class="btn small" data-act="delivered" data-id="${o.id}">🤝 Marcar entregado</button>` : ""}
             <button class="btn small primary" data-act="updates" data-id="${o.id}">📸 Contar cómo va${o.updatesCount ? ` (${o.updatesCount})` : ""}</button>
           </div>
           ${progressHtml(o)}
-          <details><summary>Editar precio / hora / lugar</summary>${priceForm(o, true)}</details>` : ""}
+          <details ${o.pickupPlace ? "" : "open"}><summary>${o.pickupPlace ? "Editar precio / hora / lugar" : "📍 Poner hora y sitio de recogida"}</summary>${priceForm(o, true)}</details>` : ""}
         <div class="actions">
-          ${["rechazado", "cancelado"].includes(o.status) ? `<button class="btn small" data-act="reopen" data-id="${o.id}">Volver a pendiente</button>` : ""}
-          <button class="btn bad small" data-act="delete" data-id="${o.id}">🗑️ Borrar</button>
+          ${["rechazado", "cancelado"].includes(o.status) ? `<button class="btn small" data-act="reopen" data-id="${o.id}">↩️ Volver a activar</button>` : ""}
+          <button class="btn small" data-act="chat" data-id="${o.id}">💬 Chat con ${esc(o.userName)}</button>
+          <button class="btn bad small owner-only" data-act="delete" data-id="${o.id}">🗑️ Borrar</button>
         </div>
       </div>`;
   }
@@ -883,8 +1075,7 @@ function start() {
     const pickupPlace = form.querySelector("[name=pickupPlace]").value.trim();
     const adminNote = form.querySelector("[name=adminNote]").value.trim();
     if (isNaN(price) || price < 0) throw new Error("Pon un precio válido.");
-    if (!pickupTime) throw new Error("Pon la hora de recogida.");
-    if (!pickupPlace) throw new Error("Pon el lugar de recogida.");
+
     const o = allOrders.find((x) => x.id === id);
     const c = calcPrice(o, price);
     return {
@@ -920,7 +1111,7 @@ function start() {
         }
         case "paid":
           await updateDoc(ref, { paid: !o.paid, paidAt: o.paid ? null : serverTimestamp() });
-          toast(o.paid ? "Marcado como NO pagado." : `💶 ${o.userName} ha pagado ${money(o.total)}.`);
+          toast(o.paid ? "Marcado como NO pagado." : `💶 ${o.userName} ha pagado ${money(orderTotal(o))}.`);
           break;
         case "ready":
           await updateDoc(ref, { status: "listo" });
@@ -929,13 +1120,34 @@ function start() {
           await updateDoc(ref, { status: "entregado", deliveredAt: serverTimestamp() });
           break;
         case "reopen":
-          await updateDoc(ref, { status: "pendiente" });
+          if (o.fromStock && o.stockReturned) {
+            // vuelve a coger el stock que se devolvió
+            await runTransaction(db, async (tx) => {
+              const snaps = await Promise.all(Object.keys(o.fromStock).map((id) => tx.get(doc(db, "stock", id))));
+              snaps.forEach((s, i) => {
+                const id = Object.keys(o.fromStock)[i];
+                if (s.exists() && (Number(s.data().qty) || 0) < o.fromStock[id]) throw new Error(`No queda stock de ${productOf(id)?.name || id}.`);
+              });
+              Object.entries(o.fromStock).forEach(([id, q]) => {
+                if (!snaps[Object.keys(o.fromStock).indexOf(id)].exists()) return;
+                tx.set(doc(db, "stock", id), { qty: increment(-q) }, { merge: true });
+                tx.set(doc(db, "stock", id, "holds", o.id), { uid: o.uid, qty: q });
+              });
+              tx.update(ref, { status: "aceptado", stockReturned: false });
+            });
+          } else {
+            await updateDoc(ref, { status: "aceptado" });
+          }
           break;
         case "updates":
           openUpdates(o);
           break;
+        case "chat":
+          openAdminChat({ uid: o.uid, userName: o.userName, userEmail: o.userEmail });
+          break;
         case "delete":
           if (!confirm("¿Borrar este pedido para siempre?")) return;
+          if (o.fromStock && !o.stockReturned && !["entregado", "listo"].includes(o.status)) await returnStockOf(o);
           await deleteDoc(ref);
           toast("Pedido borrado.");
           break;
@@ -949,8 +1161,8 @@ function start() {
     allOrders.filter((o) => BILLABLE.includes(o.status)).forEach((o) => {
       const p = people.get(o.uid) || { name: o.userName, email: o.userEmail, total: 0, paid: 0, n: 0, owed: [] };
       p.n++;
-      p.total += o.total || 0;
-      if (o.paid) p.paid += o.total || 0; else p.owed.push(o);
+      p.total += orderTotal(o);
+      if (o.paid) p.paid += orderTotal(o); else p.owed.push(o);
       people.set(o.uid, p);
     });
     const rows = [...people.values()].sort((a, b) => (b.total - b.paid) - (a.total - a.paid));
@@ -968,7 +1180,7 @@ function start() {
             </div>
             ${p.owed.map((o) => `
               <div class="actions" style="align-items:center;justify-content:space-between">
-                <span class="small">#${shortId(o.id)} · ${esc((o.description || itemsText(o.items)).slice(0, 50))}${(o.description || itemsText(o.items)).length > 50 ? "…" : ""} · <strong>${money(o.total)}</strong></span>
+                <span class="small">#${shortId(o.id)} · ${esc((o.description || itemsText(o.items)).slice(0, 50))}${(o.description || itemsText(o.items)).length > 50 ? "…" : ""} · <strong>${money(orderTotal(o))}</strong></span>
                 <button class="btn ok small" data-pay="${o.id}">💶 Pagado</button>
               </div>`).join("")}
           </div>`).join("") : `<div class="empty">Nadie te debe nada 🎉</div>`}
@@ -993,7 +1205,7 @@ function start() {
     const o = allOrders.find((x) => x.id === id);
     withBusy(e.target, async () => {
       await updateDoc(doc(db, "orders", id), { paid: true, paidAt: serverTimestamp() });
-      toast(`💶 ${o.userName} ha pagado ${money(o.total)}.`);
+      toast(`💶 ${o.userName} ha pagado ${money(orderTotal(o))}.`);
     });
   });
 
@@ -1058,7 +1270,7 @@ function start() {
     const added = snap.docChanges()
       .filter((c) => c.type === "added" && !c.doc.metadata.hasPendingWrites)
       .map((c) => ({ id: c.doc.id, ...c.doc.data() }))
-      .filter((o) => o.status === "pendiente");
+      .filter((o) => ["pendiente", "aceptado"].includes(o.status));
     if (!added.length) return;
     added.forEach((o) => {
       const what = itemsText(o.items) || (o.description || "").slice(0, 60);
@@ -1072,6 +1284,203 @@ function start() {
     });
     if (notifyOn) beep();
     if (document.hidden || !document.hasFocus()) { unseen += added.length; setTitleBadge(); }
+  }
+
+  // =================================================================== CHAT
+  // chats/{uid}: un chat por amigo con el vendedor. Mensajes en chats/{uid}/messages
+  let userChatPanel = null;
+  let adminChatPanel = null;
+  let myChat = null;
+  let allChats = [];
+  let firstChatsLoad = true;
+  let adminChatUid = null;
+
+  const timeShort = (ts) => {
+    if (!ts?.toDate) return "ahora";
+    const d = ts.toDate();
+    const today = new Date().toDateString() === d.toDateString();
+    return d.toLocaleString("es-ES", today ? { hour: "2-digit", minute: "2-digit" } : { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  };
+
+  // Crea un panel de chat dentro de `root`. side = "user" | "admin"
+  function createChatPanel(root, { meta, side, title }) {
+    const canPhoto = side === "admin";
+    root.innerHTML = `
+      <div class="chat-head"><div><div class="who">${esc(title)}</div>
+        ${side === "admin" ? `<div class="muted small">${esc(meta.userEmail || "")}</div>` : ""}</div>
+        ${side === "admin" ? `<button type="button" class="btn ghost small" data-chat-close aria-label="Cerrar chat">✕</button>` : ""}</div>
+      <div class="chat-msgs" aria-live="polite"><div class="chat-empty">Cargando…</div></div>
+      <div class="photos chat-previews"></div>
+      <form class="chat-form">
+        ${canPhoto ? `<label class="btn small" title="Mandar fotos" aria-label="Mandar fotos">📷<input type="file" accept="image/*" multiple class="visually-hidden" data-chat-files /></label>` : ""}
+        <textarea rows="1" maxlength="1000" placeholder="Escribe un mensaje…" aria-label="Mensaje"></textarea>
+        <button class="btn primary" type="submit">Enviar</button>
+      </form>`;
+    const msgsEl = root.querySelector(".chat-msgs");
+    const form = root.querySelector(".chat-form");
+    const ta = form.querySelector("textarea");
+    const prevEl = root.querySelector(".chat-previews");
+    let photos = [];
+
+    const renderPrev = () => {
+      prevEl.innerHTML = photos.map((p, i) => `<div class="thumb"><img src="${p}" alt="Foto ${i + 1}" /><button type="button" data-rm="${i}" aria-label="Quitar foto">✕</button></div>`).join("");
+    };
+    prevEl.addEventListener("click", (e) => {
+      const i = e.target.closest("[data-rm]")?.dataset.rm;
+      if (i != null) { photos.splice(Number(i), 1); renderPrev(); }
+    });
+    root.querySelector("[data-chat-files]")?.addEventListener("change", async (e) => {
+      const files = [...e.target.files];
+      e.target.value = "";
+      for (const f of files.slice(0, Math.max(0, MAX_PHOTOS - photos.length))) {
+        try { photos.push(await compressImage(f)); } catch (err) { toast(err.message, true); }
+        renderPrev();
+      }
+      if (files.length + photos.length > MAX_PHOTOS) toast(`Máximo ${MAX_PHOTOS} fotos por mensaje.`, true);
+    });
+    ta.addEventListener("input", () => { ta.style.height = "auto"; ta.style.height = Math.min(ta.scrollHeight, 120) + "px"; });
+    ta.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey && window.matchMedia("(pointer: fine)").matches) {
+        e.preventDefault();
+        form.requestSubmit();
+      }
+    });
+
+    const unsub = onSnapshot(
+      query(collection(db, "chats", meta.uid, "messages"), orderBy("createdAt", "desc"), limit(150)),
+      (snap) => {
+        const nearBottom = msgsEl.scrollHeight - msgsEl.scrollTop - msgsEl.clientHeight < 120;
+        const list = snap.docs.map((d) => ({ id: d.id, ...d.data() })).reverse();
+        msgsEl.innerHTML = list.length ? list.map((m) => {
+          const by = m.from === "admin" ? (m.by || "owner") : null;
+          const mine = side === "admin" ? by === myRole : m.from === "user";
+          const label = by ? `<span class="role ${by}">${ROLE_LABEL[by]}</span>` : "";
+          const pics = (m.photos || []).filter((p) => PHOTO_RE.test(p));
+          return `<div class="msg ${mine ? "me" : "them"}">
+            ${label}
+            ${m.text ? `<div>${esc(m.text)}</div>` : ""}
+            ${pics.length ? `<div class="photos">${pics.map((p) => `<img src="${p}" alt="Foto" loading="lazy" data-zoom />`).join("")}</div>` : ""}
+            <span class="t">${timeShort(m.createdAt)}</span>
+          </div>`;
+        }).join("") : `<div class="chat-empty">${side === "user" ? "Escríbeme lo que quieras 👋" : "Todavía no hay mensajes. ¡Escríbele!"}</div>`;
+        if (nearBottom || snap.docChanges().some((c) => c.doc.metadata.hasPendingWrites)) msgsEl.scrollTop = msgsEl.scrollHeight;
+      },
+      (e) => { msgsEl.innerHTML = `<div class="chat-empty">${esc(authError(e))}</div>`; },
+    );
+    requestAnimationFrame(() => { msgsEl.scrollTop = msgsEl.scrollHeight; });
+
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const text = ta.value.trim().slice(0, 1000);
+      if (!text && !photos.length) return;
+      const sendPhotos = photos;
+      withBusy(form.querySelector("button[type=submit]"), async () => {
+        const b = writeBatch(db);
+        b.set(doc(collection(db, "chats", meta.uid, "messages")), side === "admin"
+          ? { from: "admin", by: myRole, text, photos: sendPhotos, createdAt: serverTimestamp() }
+          : { from: "user", text, createdAt: serverTimestamp() });
+        const preview = text || (sendPhotos.length ? "📷 Foto" : "");
+        b.set(doc(db, "chats", meta.uid), {
+          uid: meta.uid,
+          userName: meta.userName,
+          userEmail: meta.userEmail,
+          lastText: preview.slice(0, 120),
+          lastAt: serverTimestamp(),
+          lastFrom: side,
+          ...(side === "admin" && { lastBy: myRole }),
+          ...(side === "admin" ? { unreadUser: increment(1) } : { unreadAdmin: increment(1) }),
+        }, { merge: true });
+        ta.value = "";
+        ta.style.height = "";
+        photos = [];
+        renderPrev();
+        await b.commit();
+      });
+    });
+
+    return { close: () => unsub(), focus: () => ta.focus() };
+  }
+
+  // ---- lado del amigo ----
+  function markRead() {
+    if (myChat?.unreadUser > 0) updateDoc(doc(db, "chats", currentUser.uid), { unreadUser: 0 }).catch(() => {});
+    show($("#chat-badge"), false);
+  }
+  function openUserChat() {
+    if (userChatPanel) return;
+    userChatPanel = createChatPanel($("#user-chat"), {
+      side: "user",
+      title: "🧊 Vendedores",
+      meta: { uid: currentUser.uid, userName: (profileName || currentUser.email).slice(0, 60), userEmail: currentUser.email },
+    });
+    markRead();
+  }
+
+  // ---- lado del admin ----
+  function renderChatList() {
+    const unreadTotal = allChats.reduce((s, c) => s + (c.unreadAdmin || 0), 0);
+    $("#chats-badge").textContent = unreadTotal;
+    show($("#chats-badge"), unreadTotal > 0);
+    $("#chat-list").innerHTML = allChats.length ? allChats.map((c) => `
+      <button type="button" class="chat-item ${c.uid === adminChatUid ? "active" : ""}" data-chat-uid="${esc(c.uid)}">
+        <span class="avatar" aria-hidden="true">${esc((c.userName || "?").slice(0, 1).toUpperCase())}</span>
+        <span class="ci-main">
+          <strong>${esc(c.userName)}</strong>
+          <div class="ci-last">${c.lastFrom === "admin" ? ((c.lastBy || "owner") === myRole ? "Tú: " : `${ROLE_LABEL[c.lastBy || "owner"]}: `) : ""}${esc(c.lastText || "")}</div>
+        </span>
+        <span class="ci-time">${timeShort(c.lastAt)}</span>
+        ${c.unreadAdmin ? `<span class="nbadge">${c.unreadAdmin}</span>` : ""}
+      </button>`).join("") : `<div class="empty">Todavía no te ha escrito nadie. También puedes abrir un chat desde un pedido con «💬 Chat».</div>`;
+    if (adminChatUid) {
+      const c = allChats.find((x) => x.uid === adminChatUid);
+      if (c?.unreadAdmin) updateDoc(doc(db, "chats", c.uid), { unreadAdmin: 0 }).catch(() => {});
+    }
+  }
+
+  function openAdminChat(meta) {
+    $('[data-admin-tab="chats"]').click();
+    adminChatPanel?.close();
+    adminChatUid = meta.uid;
+    show($("#admin-chat"));
+    adminChatPanel = createChatPanel($("#admin-chat"), { side: "admin", title: `💬 ${meta.userName}`, meta });
+    renderChatList();
+    $("#admin-chat").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  $("#chat-list").addEventListener("click", (e) => {
+    const uid = e.target.closest("[data-chat-uid]")?.dataset.chatUid;
+    const c = allChats.find((x) => x.uid === uid);
+    if (c) openAdminChat({ uid: c.uid, userName: c.userName, userEmail: c.userEmail });
+  });
+  $("#admin-chat").addEventListener("click", (e) => {
+    if (!e.target.closest("[data-chat-close]")) return;
+    adminChatPanel?.close();
+    adminChatPanel = null;
+    adminChatUid = null;
+    show($("#admin-chat"), false);
+    renderChatList();
+  });
+
+  function checkNewChatMessages(snap) {
+    if (firstChatsLoad) { firstChatsLoad = false; return; }
+    snap.docChanges().forEach((c) => {
+      const d = c.doc.data();
+      if (c.doc.metadata.hasPendingWrites || d.lastFrom !== "user" || !d.unreadAdmin) return;
+      if (c.type === "removed") return;
+      const isOpen = adminChatUid === d.uid && currentView === "admin" && !document.hidden;
+      if (isOpen) return;
+      toast(`💬 ${d.userName}: ${d.lastText}`);
+      if (notifyOn) {
+        beep();
+        if ("Notification" in window && Notification.permission === "granted") {
+          try {
+            const n = new Notification(`💬 Mensaje de ${d.userName}`, { body: d.lastText, tag: "chat-" + d.uid });
+            n.onclick = () => { window.focus(); setView("admin"); openAdminChat({ uid: d.uid, userName: d.userName, userEmail: d.userEmail }); n.close(); };
+          } catch { /* ignorar */ }
+        }
+      }
+      if (document.hidden || !document.hasFocus()) { unseen += 1; setTitleBadge(); }
+    });
   }
 
   // ---------- Contar cómo va un pedido (texto, progreso y fotos) ----------
@@ -1171,6 +1580,33 @@ function start() {
     });
   });
 
+  // ---------- Devolver stock de pedidos cancelados o rechazados ----------
+  const returning = new Set();
+  async function returnStockOf(o) {
+    if (returning.has(o.id)) return;
+    returning.add(o.id);
+    try {
+      await runTransaction(db, async (tx) => {
+        const ref = doc(db, "orders", o.id);
+        const cur = await tx.get(ref);
+        if (!cur.exists() || cur.data().stockReturned || !cur.data().fromStock) return;
+        const ids = Object.keys(cur.data().fromStock);
+        const holds = await Promise.all(ids.map((pid) => tx.get(doc(db, "stock", pid, "holds", o.id))));
+        holds.forEach((h, i) => {
+          if (!h.exists()) return;
+          tx.set(doc(db, "stock", ids[i]), { qty: increment(Number(h.data().qty) || 0) }, { merge: true });
+          tx.delete(h.ref);
+        });
+        tx.update(ref, { stockReturned: true });
+      });
+    } catch (e) { console.error(e); } finally { returning.delete(o.id); }
+  }
+  function returnStock() {
+    allOrders
+      .filter((o) => ["cancelado", "rechazado"].includes(o.status) && o.fromStock && !o.stockReturned)
+      .forEach(returnStockOf);
+  }
+
   // ---------- Sin filamento: cancelar todo lo que no está hecho ----------
   $("#no-filament").addEventListener("click", (e) => {
     const targets = allOrders.filter((o) => ["pendiente", "aceptado"].includes(o.status));
@@ -1208,6 +1644,7 @@ function start() {
       <input name="emoji" value="${esc(p.emoji || "")}" maxlength="8" aria-label="Emoji (si no hay foto)" class="emoji-in" ${photo ? "hidden" : ""} />
       <input name="name" value="${esc(p.name || "")}" maxlength="40" placeholder="Nombre" aria-label="Nombre" />
       <label class="euro"><input name="price" type="number" min="0" step="0.01" inputmode="decimal" value="${p.price ?? ""}" aria-label="Precio" /> €</label>
+      <label class="stock-in">📦 Stock <input name="stock" type="number" min="0" step="1" inputmode="numeric" value="${p.id && stockOf(p.id) != null ? stockOf(p.id) : ""}" placeholder="∞" aria-label="Stock" /></label>
       <input name="id" type="hidden" value="${esc(p.id || "")}" />
       <button type="button" class="btn bad small" data-del-row aria-label="Quitar producto">✕</button>
     </div>`;
@@ -1217,7 +1654,8 @@ function start() {
     $("#admin-prices").innerHTML = `
       <div class="card">
         <h3>💶 Precios</h3>
-        <p class="muted small">Los cambios se ven al momento en la web de tus amigos. Los pedidos ya aceptados mantienen su precio.</p>
+        <p class="muted small">Los cambios se ven al momento en la web de tus amigos. Los pedidos ya hechos mantienen su precio.</p>
+        <p class="muted small">📦 <strong>Stock</strong>: cuántos tienes ya hechos. Baja solo con cada pedido y vuelve si se cancela o rechaza. Déjalo vacío (∞) si lo imprimes por encargo sin límite; pon 0 para «Agotado».</p>
         <div id="price-rows" class="price-rows">${catalog.map(priceRow).join("")}</div>
         <button type="button" class="btn small" id="add-product">➕ Añadir producto</button>
         <label class="keychain-row">🔑 Suplemento versión llavero
@@ -1272,6 +1710,7 @@ function start() {
     } else if (e.target.closest("#save-prices")) {
       withBusy(e.target, async () => {
         const used = new Set();
+        const stockPlan = {};
         const products = $$("#price-rows [data-row]").map((r) => {
           const name = r.querySelector("[name=name]").value.trim();
           const price = parseFloat(r.querySelector("[name=price]").value.replace(",", "."));
@@ -1281,6 +1720,9 @@ function start() {
           while (used.has(id)) id += "-2";
           used.add(id);
           const photo = PHOTO_RE.test(r.dataset.photo || "") ? r.dataset.photo : "";
+          const st = r.querySelector("[name=stock]").value.trim();
+          if (st !== "" && !(Number.isInteger(Number(st)) && Number(st) >= 0)) throw new Error(`El stock de «${name}» tiene que ser un número entero.`);
+          stockPlan[id] = st === "" ? null : Number(st);
           return { id, name, emoji: r.querySelector("[name=emoji]").value.trim(), price: round2(price), ...(photo && { photo }) };
         });
         if (JSON.stringify(products).length > 900000) {
@@ -1289,7 +1731,15 @@ function start() {
         const k = parseFloat($("#keychain-extra").value.replace(",", "."));
         if (isNaN(k) || k < 0) throw new Error("Pon un precio válido al llavero.");
         pricesDirty = false;
-        await setDoc(doc(db, "settings", "shop"), { products, keychainExtra: round2(k), updatedAt: serverTimestamp() });
+        const b = writeBatch(db);
+        b.set(doc(db, "settings", "shop"), { products, keychainExtra: round2(k), updatedAt: serverTimestamp() });
+        // stock: poner, cambiar o quitar el límite; y borrar el de productos eliminados
+        Object.entries(stockPlan).forEach(([id, v]) => {
+          if (v == null) { if (stockOf(id) != null) b.delete(doc(db, "stock", id)); }
+          else if (v !== stockOf(id)) b.set(doc(db, "stock", id), { qty: v });
+        });
+        Object.keys(stock).filter((id) => !(id in stockPlan)).forEach((id) => b.delete(doc(db, "stock", id)));
+        await b.commit();
         toast("✅ Precios guardados.");
       });
     }

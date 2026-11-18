@@ -20,6 +20,10 @@ export const SITE_NAME = "Impresión 3D";
 //    OJO: si lo cambias, cámbialo también en firestore.rules
 export const ADMIN_EMAIL = "o39459309@gmail.com";
 
+// 3a) Co-dueños: gestionan pedidos y chats, pero no el dinero, los precios
+//     ni borrar. OJO: si lo cambias, cámbialo también en firestore.rules
+export const COOWNER_EMAILS = ["martincsurcui@gmail.com"];
+
 // 3b) Envío del código de verificación al crear cuenta (EmailJS, gratis).
 //     Mientras esté vacío, en vez de un código se manda un enlace de verificación.
 //     Pasos en el README → "Código de verificación por correo".

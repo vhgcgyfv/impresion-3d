@@ -12,6 +12,7 @@
     <div class="brand">🧊 <span>Impresión 3D</span></div>
     <nav id="nav" class="nav hidden">
       <button id="nav-client" class="btn ghost small">Mis pedidos</button>
+      <button id="nav-chat" class="btn ghost small hidden">💬 Chat<span id="chat-badge" class="nbadge hidden"></span></button>
       <button id="nav-admin" class="btn ghost small hidden">Panel admin</button>
       <span id="nav-user" class="nav-user"></span>
       <button id="logout" class="btn ghost small">Salir</button>
@@ -123,9 +124,16 @@
       <div id="my-orders" class="list"></div>
     </section>
 
+    <!-- ============ CHAT CON EL VENDEDOR ============ -->
+    <section id="chat-view" class="hidden">
+      <h2 class="section-title">💬 Chat con el vendedor</h2>
+      <p class="muted small">Pregunta lo que quieras: colores, tamaños, cuándo está listo… Solo lo vemos tú y yo.</p>
+      <div id="user-chat" class="card chat-card"></div>
+    </section>
+
     <!-- ============ PANEL ADMIN ============ -->
     <section id="admin-view" class="hidden">
-      <h2 class="section-title">🛠️ Panel de administrador</h2>
+      <h2 class="section-title" id="admin-title">🛠️ Panel de administrador</h2>
 
       <div class="card notify">
         <div>
@@ -135,7 +143,7 @@
         <button id="notify-btn" class="btn primary">Activar avisos</button>
       </div>
 
-      <div class="card filament">
+      <div class="card filament owner-only">
         <div>
           <strong>🧵 ¿Te has quedado sin filamento?</strong>
           <div class="muted small">Cancela de golpe todos los pedidos pendientes y aceptados que aún no has marcado como listos. Tus amigos lo verán en sus pedidos.</div>
@@ -147,8 +155,9 @@
 
       <div class="tabs admin-tabs">
         <button class="tab active" data-admin-tab="orders">Pedidos</button>
-        <button class="tab" data-admin-tab="accounts">Cuentas (pagos)</button>
-        <button class="tab" data-admin-tab="prices">Precios</button>
+        <button class="tab" data-admin-tab="chats">Chats<span id="chats-badge" class="nbadge hidden"></span></button>
+        <button class="tab owner-only" data-admin-tab="accounts">Cuentas (pagos)</button>
+        <button class="tab owner-only" data-admin-tab="prices">Precios</button>
         <button class="tab" data-admin-tab="codes">Códigos</button>
       </div>
 
@@ -169,8 +178,14 @@
         <div id="admin-order-list" class="list"></div>
       </div>
 
-      <div id="admin-accounts" data-admin-panel="accounts" class="hidden"></div>
-      <div id="admin-prices" data-admin-panel="prices" class="hidden"></div>
+      <div id="admin-chats" data-admin-panel="chats" class="hidden">
+        <div class="chats-layout">
+          <div id="chat-list" class="chat-list"></div>
+          <div id="admin-chat" class="card chat-card hidden"></div>
+        </div>
+      </div>
+      <div id="admin-accounts" data-admin-panel="accounts" class="hidden owner-only"></div>
+      <div id="admin-prices" data-admin-panel="prices" class="hidden owner-only"></div>
       <div id="admin-codes" data-admin-panel="codes" class="hidden"></div>
     </section>
   </main>
@@ -213,8 +228,15 @@
 
   <div id="rick" class="rick hidden" role="dialog" aria-label="Sorpresa">
     <div class="rick-box">
-      <div id="rick-frame" class="rick-frame"></div>
-      <div class="rick-count">Tu descuento llega en <span id="rick-count">5</span>…</div>
+      <div class="rick-stage">
+        <div id="rick-frame" class="rick-frame"></div>
+        <div id="rick-cover" class="rick-cover" aria-hidden="true">
+          <div class="gift">🎁</div>
+          <div class="gift-txt">Tienes un regalo…</div>
+        </div>
+      </div>
+      <div class="rick-count" id="rick-msg">Abriendo tu regalo…</div>
+      <div class="rick-hint hidden" id="rick-hint">👆 Toca el regalo para abrirlo</div>
     </div>
   </div>
 
