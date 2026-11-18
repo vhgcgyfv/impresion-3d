@@ -24,10 +24,10 @@ export const ADMIN_EMAIL = "o39459309@gmail.com";
 //     Mientras esté vacío, en vez de un código se manda un enlace de verificación.
 //     Pasos en el README → "Código de verificación por correo".
 export const EMAILJS = {
-  serviceId: "",   // p. ej. "service_abc123"
-  templateId: "",  // plantilla del código, p. ej. "template_xyz789"
-  orderTemplateId: "", // plantilla del aviso de pedido nuevo (te llega a ti)
-  publicKey: "",   // Account → General → Public Key
+  serviceId: "service_0f0j8m6",   // p. ej. "service_abc123"
+  templateId: "template_qsydhgm",  // plantilla del código, p. ej. "template_xyz789"
+  orderTemplateId: "template_pouf8uf", // plantilla del aviso de pedido nuevo (te llega a ti)
+  publicKey: "rJSTf0tXceLR1wp5d",   // Account → General → Public Key
 };
 
 // 4) Suplemento por versión llavero (en euros, por pedido)
