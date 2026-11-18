@@ -25,7 +25,8 @@ export const ADMIN_EMAIL = "o39459309@gmail.com";
 //     Pasos en el README → "Código de verificación por correo".
 export const EMAILJS = {
   serviceId: "",   // p. ej. "service_abc123"
-  templateId: "",  // p. ej. "template_xyz789"
+  templateId: "",  // plantilla del código, p. ej. "template_xyz789"
+  orderTemplateId: "", // plantilla del aviso de pedido nuevo (te llega a ti)
   publicKey: "",   // Account → General → Public Key
 };
 

@@ -447,6 +447,7 @@ function start() {
   onAuthStateChanged(auth, async (user) => {
     unsubs.forEach((u) => u());
     unsubs = [];
+    firstOrdersLoad = true;
     currentUser = user;
     show($("#loading"), false);
 
@@ -497,6 +498,7 @@ function start() {
         query(collection(db, "orders"), orderBy("createdAt", "desc")),
         (snap) => {
           allOrders = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          checkNewOrders(snap);
           renderAdmin();
         },
         (e) => toast(authError(e), true),
@@ -537,6 +539,7 @@ function start() {
         paid: false,
         createdAt: serverTimestamp(),
       });
+      notifyAdminByEmail({ description, items, offer: f.offer.value, keychain: f.keychain.checked, promoCode });
       f.reset();
       codeApplied = "";
       codeMsg.textContent = "";
@@ -544,6 +547,34 @@ function start() {
       toast("¡Pedido enviado! Te avisaré aquí cuando lo acepte.");
     });
   });
+
+  // Te manda un correo a ti (admin) con cada pedido nuevo (si EmailJS está configurado)
+  function notifyAdminByEmail(o) {
+    if (!EMAILJS?.serviceId || !EMAILJS?.publicKey || !EMAILJS?.orderTemplateId) return;
+    const c = calcPrice(o);
+    fetch("https://api.emailjs.com/api/v1.0/email/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        service_id: EMAILJS.serviceId,
+        template_id: EMAILJS.orderTemplateId,
+        user_id: EMAILJS.publicKey,
+        template_params: {
+          to_email: ADMIN_EMAIL,
+          site_name: SITE_NAME,
+          username: profileName || currentUser.email,
+          user_email: currentUser.email,
+          items: itemsText(o.items) || "—",
+          description: o.description || "—",
+          offer: o.offer ? offerTitle(o.offer) : "—",
+          keychain: o.keychain ? "Sí" : "No",
+          promo_code: o.promoCode || "—",
+          estimate: Object.keys(o.items).length ? money(c.total) : "a decidir",
+          admin_url: location.origin + location.pathname,
+        },
+      }),
+    }).catch(() => {});
+  }
 
   // ---------- Mis pedidos ----------
   function orderTags(o) {
@@ -863,6 +894,83 @@ function start() {
       toast(`💶 ${o.userName} ha pagado ${money(o.total)}.`);
     });
   });
+
+  // ---------- Avisos de pedidos nuevos (sonido + notificación + título) ----------
+  let firstOrdersLoad = true;
+  let unseen = 0;
+  let audioCtx = null;
+  const lsGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
+  const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* sin almacenamiento */ } };
+  let notifyOn = lsGet("notify") === "1";
+
+  function updateNotifyUi() {
+    const perm = "Notification" in window ? Notification.permission : "unsupported";
+    $("#notify-btn").textContent = notifyOn ? "🔕 Desactivar" : "🔔 Activar avisos";
+    $("#notify-status").textContent = !notifyOn
+      ? "Con esta página abierta, te suena y te sale una notificación cada vez que alguien pide algo."
+      : perm === "granted" ? "✅ Activados: sonido + notificación con la página abierta (aunque esté en otra pestaña)."
+      : "✅ Sonido activado. El navegador no permite notificaciones: solo sonará y cambiará el título.";
+  }
+  updateNotifyUi();
+
+  function beep() {
+    try {
+      audioCtx ||= new (window.AudioContext || window.webkitAudioContext)();
+      [0, 0.18, 0.36].forEach((t, i) => {
+        const o = audioCtx.createOscillator();
+        const g = audioCtx.createGain();
+        o.type = "sine";
+        o.frequency.value = [880, 1175, 1568][i];
+        g.gain.setValueAtTime(0.0001, audioCtx.currentTime + t);
+        g.gain.exponentialRampToValueAtTime(0.3, audioCtx.currentTime + t + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + t + 0.16);
+        o.connect(g).connect(audioCtx.destination);
+        o.start(audioCtx.currentTime + t);
+        o.stop(audioCtx.currentTime + t + 0.17);
+      });
+    } catch { /* sin audio */ }
+  }
+
+  $("#notify-btn").addEventListener("click", async () => {
+    notifyOn = !notifyOn;
+    lsSet("notify", notifyOn ? "1" : "0");
+    if (notifyOn) {
+      beep(); // desbloquea el audio y sirve de prueba
+      if ("Notification" in window && Notification.permission === "default") {
+        try { await Notification.requestPermission(); } catch { /* ignorar */ }
+      }
+    }
+    updateNotifyUi();
+  });
+
+  function setTitleBadge() {
+    document.title = unseen ? `(${unseen}) 🔔 ${SITE_NAME}` : SITE_NAME;
+  }
+  window.addEventListener("focus", () => { unseen = 0; setTitleBadge(); });
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) { unseen = 0; setTitleBadge(); }
+  });
+
+  function checkNewOrders(snap) {
+    if (firstOrdersLoad) { firstOrdersLoad = false; return; }
+    const added = snap.docChanges()
+      .filter((c) => c.type === "added" && !c.doc.metadata.hasPendingWrites)
+      .map((c) => ({ id: c.doc.id, ...c.doc.data() }))
+      .filter((o) => o.status === "pendiente");
+    if (!added.length) return;
+    added.forEach((o) => {
+      const what = itemsText(o.items) || (o.description || "").slice(0, 60);
+      toast(`🛒 Pedido nuevo de ${o.userName}: ${what}`);
+      if (notifyOn && "Notification" in window && Notification.permission === "granted") {
+        try {
+          const n = new Notification(`🛒 Pedido nuevo de ${o.userName}`, { body: what, tag: o.id });
+          n.onclick = () => { window.focus(); setView("admin"); n.close(); };
+        } catch { /* algunos móviles no dejan crear notificaciones así */ }
+      }
+    });
+    if (notifyOn) beep();
+    if (document.hidden || !document.hasFocus()) { unseen += added.length; setTitleBadge(); }
+  }
 
   // ---------- Sin filamento: cancelar todo lo que no está hecho ----------
   $("#no-filament").addEventListener("click", (e) => {

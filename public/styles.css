@@ -224,3 +224,7 @@ td.num, th.num { text-align: right; }
 /* ---------- Sin filamento ---------- */
 .filament { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; border-color: var(--bad); }
 .filament > div { flex: 1 1 240px; }
+
+/* ---------- Avisos ---------- */
+.notify { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.notify > div { flex: 1 1 240px; }

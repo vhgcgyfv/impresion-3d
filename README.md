@@ -11,6 +11,7 @@ Web para que tus amigos te pidan impresiones 3D:
   - Marcar pedidos como *listo* / *entregado*.
   - **Cuentas**: quién te ha pagado y quién te debe (y cuánto), con un botón para marcar pagado.
   - **Códigos**: cuánta gente ha usado `manchis14`.
+  - **Avisos de pedidos nuevos**: te llega un **correo** con cada pedido (con EmailJS) y, con el panel abierto, **suena** y sale una **notificación** (botón «Activar avisos»).
   - **Sin filamento**: un botón que cancela de golpe todos los pedidos pendientes y aceptados que aún no has marcado como listos (tus amigos ven el aviso).
   - **Precios**: cambia el precio de cada producto y del llavero, añade o quita productos. Tus amigos ven los precios nuevos al momento.
 - Ofertas incluidas: **2 Fennecs + balón GRATIS**.
@@ -50,7 +51,20 @@ Firebase solo sabe mandar enlaces, así que los códigos de 6 cifras se envían 
    - **Content**: `Hola {{username}}, tu código para crear la cuenta en {{site_name}} es: {{code}}. Caduca en 10 minutos.`
    - Guarda y apunta el **Template ID**.
 4. **Account** → **General** → apunta la **Public Key**.
-5. Pon los tres valores en `EMAILJS` dentro de [`public/config.js`](public/config.js).
+5. **Correo de aviso de pedido nuevo (te llega a ti)**: crea otra plantilla:
+   - **To Email**: `{{to_email}}`
+   - **Subject**: `🛒 Pedido nuevo de {{username}}`
+   - **Content**:
+     ```
+     {{username}} ({{user_email}}) ha hecho un pedido:
+     Productos: {{items}}
+     Detalles: {{description}}
+     Oferta: {{offer}} · Llavero: {{keychain}} · Código: {{promo_code}}
+     Total aproximado: {{estimate}}
+     Aceptarlo: {{admin_url}}
+     ```
+   - Apunta su **Template ID**.
+6. Pon los valores en `EMAILJS` dentro de [`public/config.js`](public/config.js) (`serviceId`, `templateId`, `orderTemplateId`, `publicKey`).
 
 ### 5. Activa tu cuenta de admin (¡hazlo antes que nadie!)
 1. En la web → **Crear cuenta** con `o39459309@gmail.com` (usuario, código y contraseña como todos).
