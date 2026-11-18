@@ -5,12 +5,12 @@
 // 1) Pega aquí la configuración de tu proyecto de Firebase
 //    (Firebase console → ⚙️ Configuración del proyecto → Tus apps → Web)
 export const firebaseConfig = {
-  apiKey: "PEGA_AQUI_TU_API_KEY",
-  authDomain: "TU-PROYECTO.firebaseapp.com",
-  projectId: "TU-PROYECTO",
-  storageBucket: "TU-PROYECTO.appspot.com",
-  messagingSenderId: "000000000000",
-  appId: "1:000000000000:web:0000000000000000",
+  apiKey: "AIzaSyCVugBPIS38xiQ88cYHvhgH1l0i5NvMGhg",
+  authDomain: "impresion3d-4bdb7.firebaseapp.com",
+  projectId: "impresion3d-4bdb7",
+  storageBucket: "impresion3d-4bdb7.firebasestorage.app",
+  messagingSenderId: "42350154042",
+  appId: "1:42350154042:web:4dd581ac38769e06e60003",
 };
 
 // 2) Nombre de la web (sale arriba y en la pestaña del navegador)
