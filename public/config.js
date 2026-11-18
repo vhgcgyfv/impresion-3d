@@ -22,7 +22,11 @@ export const ADMIN_EMAIL = "o39459309@gmail.com";
 
 // 3a) Co-dueños: gestionan pedidos y chats, pero no el dinero, los precios
 //     ni borrar. OJO: si lo cambias, cámbialo también en firestore.rules
-export const COOWNER_EMAILS = ["martincsurcui@gmail.com"];
+export const COOWNER_EMAILS = [];
+
+// 3a-bis) Cuentas bloqueadas: no pueden pedir, chatear ni nada.
+//         OJO: si lo cambias, cámbialo también en firestore.rules (isBanned)
+export const BANNED_EMAILS = ["martincsurcui@gmail.com"];
 
 // 3b) Envío del código de verificación al crear cuenta (EmailJS, gratis).
 //     Mientras esté vacío, en vez de un código se manda un enlace de verificación.
