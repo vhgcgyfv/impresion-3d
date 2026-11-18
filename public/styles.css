@@ -439,3 +439,33 @@ body.guest #guest-hero { display: block !important; text-align: center; margin: 
 .em-arrow { color: var(--muted); }
 .em-new { font-size: 1.3rem; text-align: center; padding: 6px; }
 .em-label { font-size: .88rem; color: var(--muted); }
+
+/* ---------- Permisos ---------- */
+.perm-off { display: none !important; }
+.perm-box { margin: -4px 0 10px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); }
+.perm-box summary { margin: 0; }
+.perm-grid { display: grid; gap: 6px; margin-top: 8px; }
+.perm-grid .switch { font-weight: 500; }
+.link.small { font-size: .8rem; padding: 2px 0; }
+
+/* ---------- Ofertas y códigos (editores) ---------- */
+.offer-rows, .code-rows { display: grid; gap: 12px; margin-bottom: 10px; }
+.oq-title { font-weight: 700; font-size: .85rem; margin-top: 4px; }
+.oq-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px; }
+.oq { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: .85rem; }
+.oq input { width: 56px; padding: 6px; text-align: center; }
+.code-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.code-row [name=code] { flex: 1 1 120px; width: auto; }
+.code-row .euro input { width: 64px; }
+
+/* ---------- Ficha de producto ---------- */
+.p-open { border: 0; background: none; padding: 0; cursor: pointer; flex: none; }
+.p-info[data-open-product] { cursor: pointer; }
+.p-more { color: var(--primary); font-size: .8rem; }
+.pm-photos { display: grid; grid-auto-flow: column; grid-auto-columns: 85%; gap: 8px; overflow-x: auto; scroll-snap-type: x mandatory; border-radius: 12px; }
+.pm-photos img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 12px; scroll-snap-align: start; cursor: zoom-in; }
+.pm-photos:has(img:only-child) { grid-auto-columns: 100%; }
+.pm-emoji { font-size: 5rem; text-align: center; padding: 10px 0; }
+.pm-price { font-size: 1.3rem; font-weight: 800; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.pm-desc { white-space: pre-wrap; line-height: 1.5; }
+.blocked-until { font-weight: 700; color: var(--text); }

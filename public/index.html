@@ -80,6 +80,7 @@
         <div class="blocked-ico">🚫</div>
         <h2>Tu cuenta está bloqueada</h2>
         <p class="muted">No puedes hacer pedidos ni usar el chat.</p>
+        <p id="blocked-until" class="blocked-until hidden"></p>
       </div>
     </section>
 
@@ -176,16 +177,17 @@
       <div id="stats" class="stats"></div>
 
       <div class="tabs admin-tabs">
-        <button class="tab active" data-admin-tab="orders">Pedidos</button>
-        <button class="tab" data-admin-tab="chats">Chats<span id="chats-badge" class="nbadge hidden"></span></button>
-        <button class="tab owner-only" data-admin-tab="accounts">Cuentas (pagos)</button>
-        <button class="tab owner-only" data-admin-tab="prices">Precios</button>
-        <button class="tab" data-admin-tab="codes" id="codes-tab">Códigos</button>
-        <button class="tab owner-only" data-admin-tab="bans">🚫 Ban</button>
+        <button class="tab active" data-admin-tab="orders" data-perm="orders">Pedidos</button>
+        <button class="tab" data-admin-tab="chats" data-perm="chats">Chats<span id="chats-badge" class="nbadge hidden"></span></button>
+        <button class="tab" data-admin-tab="accounts" data-perm="money">Cuentas (pagos)</button>
+        <button class="tab" data-admin-tab="prices" data-perm="prices">Precios</button>
+        <button class="tab" data-admin-tab="offers" data-perm="offers">🔥 Ofertas</button>
+        <button class="tab" data-admin-tab="codes" id="codes-tab" data-perm="codes">🎟️ Códigos</button>
+        <button class="tab" data-admin-tab="bans" data-perm="bans">🚫 Ban</button>
         <button class="tab owner-only" data-admin-tab="roles">👥 Roles</button>
-        <button class="tab owner-only" data-admin-tab="stats">📊 Analíticas</button>
-        <button class="tab owner-only" data-admin-tab="notices">📢 Avisos</button>
-        <button class="tab owner-only" data-admin-tab="emojis">😀 Emojis</button>
+        <button class="tab" data-admin-tab="stats" data-perm="stats">📊 Analíticas</button>
+        <button class="tab" data-admin-tab="notices" data-perm="notices">📢 Avisos</button>
+        <button class="tab" data-admin-tab="emojis" data-perm="emojis">😀 Emojis</button>
       </div>
 
       <div id="admin-orders" data-admin-panel="orders">
@@ -205,26 +207,50 @@
         <div id="admin-order-list" class="list"></div>
       </div>
 
-      <div id="admin-chats" data-admin-panel="chats" class="hidden">
+      <div id="admin-chats" data-admin-panel="chats" class="hidden" data-perm="chats">
         <div class="chats-layout">
           <div id="chat-list" class="chat-list"></div>
           <div id="admin-chat" class="card chat-card hidden"></div>
         </div>
       </div>
-      <div id="admin-accounts" data-admin-panel="accounts" class="hidden owner-only"></div>
-      <div id="admin-prices" data-admin-panel="prices" class="hidden owner-only"></div>
-      <div id="admin-codes" data-admin-panel="codes" class="hidden"></div>
+      <div id="admin-accounts" data-admin-panel="accounts" class="hidden" data-perm="money"></div>
+      <div id="admin-prices" data-admin-panel="prices" class="hidden" data-perm="prices"></div>
+      <div id="admin-offers" data-admin-panel="offers" class="hidden" data-perm="offers">
+        <div class="card">
+          <h3>🔥 Ofertas</h3>
+          <p class="muted small">Lo que incluye cada oferta se añade solo al pedido al pulsar «La quiero». Lo que pongas en «Gratis» se descuenta del precio.</p>
+          <div id="offer-rows" class="offer-rows"></div>
+          <div class="actions"><button type="button" class="btn small" id="add-offer">➕ Añadir oferta</button></div>
+          <div class="actions">
+            <button type="button" class="btn primary" id="save-offers">Guardar ofertas</button>
+            <button type="button" class="btn ghost" id="reset-offers">Deshacer cambios</button>
+          </div>
+        </div>
+      </div>
+      <div id="admin-codes" data-admin-panel="codes" class="hidden" data-perm="codes">
+        <div class="card">
+          <h3>🎟️ Tus códigos</h3>
+          <p class="muted small">Crea códigos de descuento. «Sorpresa» = sale el regalo con el rickroll antes de aplicar el descuento.</p>
+          <div id="code-rows" class="code-rows"></div>
+          <div class="actions"><button type="button" class="btn small" id="add-code">➕ Añadir código</button></div>
+          <div class="actions">
+            <button type="button" class="btn primary" id="save-codes">Guardar códigos</button>
+            <button type="button" class="btn ghost" id="reset-codes">Deshacer cambios</button>
+          </div>
+        </div>
+        <div id="code-usage"></div>
+      </div>
       <div id="admin-roles" data-admin-panel="roles" class="hidden owner-only">
         <div class="card">
           <h3>👥 Rangos</h3>
-          <p class="muted small"><strong>🤝 Co-dueño</strong>: gestiona pedidos (hora, sitio, precio, estado, «cómo va») y contesta los chats con su etiqueta. No puede tocar pagos, precios, stock, baneos ni borrar.</p>
+          <p class="muted small"><strong>🤝 Co-dueño</strong>: tú eliges qué puede hacer en «Permisos» (se abre en cada co-dueño). Nunca puede borrar pedidos, dar rangos ni cancelar todo por falta de filamento.</p>
           <p class="muted small">📧 Al darle el rango, <strong>le llega solo un enlace a su correo</strong> la próxima vez que entre en la web. Cuando lo abra y recargue, ya tendrá su panel.</p>
           <input id="role-search" type="search" placeholder="Buscar por nombre o correo…" />
           <div id="role-list" class="user-list"></div>
         </div>
       </div>
 
-      <div id="admin-stats" data-admin-panel="stats" class="hidden owner-only">
+      <div id="admin-stats" data-admin-panel="stats" class="hidden" data-perm="stats">
         <div class="filters an-filters" role="group" aria-label="Periodo">
           <button type="button" class="chip" data-range="7">7 días</button>
           <button type="button" class="chip active" data-range="30">30 días</button>
@@ -234,7 +260,7 @@
         <div id="an-body"></div>
       </div>
 
-      <div id="admin-emojis" data-admin-panel="emojis" class="hidden owner-only">
+      <div id="admin-emojis" data-admin-panel="emojis" class="hidden" data-perm="emojis">
         <div class="card">
           <h3>😀 Emojis de la web</h3>
           <p class="muted small">Escribe al lado el emoji nuevo y pulsa «Guardar emojis»: se cambia en toda la web para todo el mundo. Déjalo vacío para dejar el original. Lo que escribe la gente (pedidos, chat) no se toca.</p>
@@ -247,7 +273,7 @@
         </div>
       </div>
 
-      <div id="admin-notices" data-admin-panel="notices" class="hidden owner-only">
+      <div id="admin-notices" data-admin-panel="notices" class="hidden" data-perm="notices">
         <div class="card">
           <h3>📢 Avisos de la web</h3>
           <p class="muted small">Salen arriba del todo, en la portada y en la página de pedidos. Puedes tener varios y encenderlos o apagarlos.</p>
@@ -262,7 +288,7 @@
         </div>
       </div>
 
-      <div id="admin-bans" data-admin-panel="bans" class="hidden owner-only">
+      <div id="admin-bans" data-admin-panel="bans" class="hidden" data-perm="bans">
         <div class="card">
           <h3>🚫 Banear a alguien</h3>
           <p class="muted small">Una cuenta baneada no puede hacer pedidos ni usar el chat. Al entrar solo ve «Tu cuenta está bloqueada».</p>
@@ -272,6 +298,16 @@
             </label>
             <label>Motivo (opcional, solo lo ves tú)
               <input name="reason" maxlength="200" />
+            </label>
+            <label>Cuánto tiempo
+              <select name="dur" id="ban-dur">
+                <option value="0">Para siempre</option>
+                <option value="1">1 hora</option>
+                <option value="24">1 día</option>
+                <option value="72">3 días</option>
+                <option value="168">1 semana</option>
+                <option value="720">1 mes</option>
+              </select>
             </label>
             <button class="btn bad" type="submit">🚫 Banear</button>
           </form>
@@ -318,6 +354,39 @@
       </form>
       <h4>Publicado</h4>
       <div id="upd-list" class="updates"></div>
+    </div>
+  </div>
+
+  <!-- Ficha de producto -->
+  <div id="product-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="pm-name">
+    <div class="modal-box">
+      <div class="modal-head">
+        <h3 id="pm-name"></h3>
+        <button type="button" class="btn ghost small" id="pm-close" aria-label="Cerrar y volver">✕</button>
+      </div>
+      <div id="pm-body"></div>
+    </div>
+  </div>
+
+  <!-- Editar ficha de producto (equipo) -->
+  <div id="pe-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="pe-title">
+    <div class="modal-box">
+      <div class="modal-head">
+        <h3 id="pe-title">📝 Ficha del producto</h3>
+        <button type="button" class="btn ghost small" id="pe-close" aria-label="Cerrar">✕</button>
+      </div>
+      <form id="pe-form" class="form">
+        <label>Descripción
+          <textarea name="description" rows="4" maxlength="1000" placeholder="Tamaño, colores, cuánto tarda en imprimirse…"></textarea>
+        </label>
+        <div class="photo-pick">
+          <label class="btn small" for="pe-files">📷 Añadir fotos</label>
+          <input id="pe-files" type="file" accept="image/*" multiple class="visually-hidden" />
+          <span class="muted small">Hasta 4 fotos</span>
+        </div>
+        <div id="pe-previews" class="photos"></div>
+        <button class="btn primary" type="submit">Guardar ficha</button>
+      </form>
     </div>
   </div>
 
