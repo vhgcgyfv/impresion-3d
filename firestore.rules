@@ -1,0 +1,88 @@
+rules_version = '2';
+
+// Reglas de seguridad de la base de datos.
+// Copia este archivo entero en Firebase console → Firestore Database → Reglas → Publicar.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    // Solo el correo del admin (y verificado) puede administrar
+    function isAdmin() {
+      return signedIn()
+        && request.auth.token.email == 'o39459309@gmail.com'
+        && request.auth.token.email_verified == true;
+    }
+
+    function shortString(v, min, max) {
+      return v is string && v.size() >= min && v.size() <= max;
+    }
+
+    // ---------- Perfiles de usuario ----------
+    match /users/{uid} {
+      allow read: if isAdmin() || (signedIn() && request.auth.uid == uid);
+      allow create, update: if signedIn()
+        && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['name', 'username', 'email', 'createdAt'])
+        && shortString(request.resource.data.name, 1, 60)
+        && request.resource.data.email == request.auth.token.email
+        // el usuario tiene que ser suyo de verdad (reservado en /usernames)
+        && (!('username' in request.resource.data)
+            || getAfter(/databases/$(database)/documents/usernames/$(request.resource.data.username)).data.uid == request.auth.uid);
+      allow delete: if isAdmin();
+    }
+
+    // ---------- Nombres de usuario (para que no se repitan) ----------
+    match /usernames/{name} {
+      allow get: if true;
+      allow create: if signedIn()
+        && name.matches('^[a-z0-9_.]{3,20}$')
+        && request.resource.data.keys().hasOnly(['uid'])
+        && request.resource.data.uid == request.auth.uid;
+      allow delete: if isAdmin();
+    }
+
+    // ---------- Ajustes de la tienda (precios) ----------
+    // Todos pueden ver los precios; solo el admin puede cambiarlos
+    match /settings/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // ---------- Pedidos ----------
+    match /orders/{orderId} {
+      allow read: if isAdmin()
+        || (signedIn() && resource.data.uid == request.auth.uid);
+
+      // Un amigo solo puede crear pedidos "pendiente", sin precio ni pago
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly([
+             'uid', 'userName', 'userEmail', 'description', 'offer',
+             'items', 'keychain', 'promoCode', 'status', 'paid', 'createdAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.userEmail == request.auth.token.email
+        && shortString(request.resource.data.userName, 1, 60)
+        && shortString(request.resource.data.description, 0, 1000)
+        && request.resource.data.items is map
+        && request.resource.data.items.size() <= 20
+        && shortString(request.resource.data.offer, 0, 40)
+        && shortString(request.resource.data.promoCode, 0, 30)
+        && request.resource.data.keychain is bool
+        && request.resource.data.status == 'pendiente'
+        && request.resource.data.paid == false
+        && request.resource.data.createdAt == request.time;
+
+      // El admin puede cambiarlo todo; el amigo solo puede cancelar si sigue pendiente
+      allow update: if isAdmin()
+        || (signedIn()
+            && resource.data.uid == request.auth.uid
+            && resource.data.status == 'pendiente'
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
+            && request.resource.data.status == 'cancelado');
+
+      allow delete: if isAdmin();
+    }
+  }
+}

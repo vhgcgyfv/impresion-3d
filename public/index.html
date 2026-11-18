@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Impresión 3D — Pedidos</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧊</text></svg>" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">🧊 <span>Impresión 3D</span></div>
+    <nav id="nav" class="nav hidden">
+      <button id="nav-client" class="btn ghost small">Mis pedidos</button>
+      <button id="nav-admin" class="btn ghost small hidden">Panel admin</button>
+      <span id="nav-user" class="nav-user"></span>
+      <button id="logout" class="btn ghost small">Salir</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- Aviso si falta configurar Firebase -->
+    <section id="setup-warning" class="card warn hidden">
+      <h2>⚙️ Falta configurar Firebase</h2>
+      <p>Abre <code>public/config.js</code> y pega la configuración de tu proyecto de Firebase.
+        Las instrucciones están en el <code>README.md</code>.</p>
+    </section>
+
+    <div id="loading" class="loading">Cargando…</div>
+
+    <!-- ============ LOGIN / REGISTRO ============ -->
+    <section id="auth-view" class="auth hidden">
+      <div class="hero">
+        <h1>Pide tus figuras en 3D</h1>
+        <p>Crea tu cuenta, escribe lo que quieres y te digo precio, hora y sitio para recogerlo.</p>
+        <p class="cash">💶 Solo pago en efectivo al recoger</p>
+      </div>
+
+      <div class="card auth-card">
+        <div class="tabs">
+          <button class="tab active" data-auth-tab="login">Entrar</button>
+          <button class="tab" data-auth-tab="register">Crear cuenta</button>
+        </div>
+
+        <form id="login-form" class="form">
+          <label>Correo<input type="email" name="email" required autocomplete="email" /></label>
+          <label>Contraseña<input type="password" name="password" required autocomplete="current-password" /></label>
+          <button class="btn primary" type="submit">Entrar</button>
+          <button class="link" type="button" id="forgot">¿Has olvidado la contraseña?</button>
+        </form>
+
+        <form id="register-form" class="form hidden">
+          <label>Usuario (3-20 letras, números, punto o _)
+            <input name="username" required minlength="3" maxlength="20" pattern="[A-Za-z0-9_.]{3,20}" autocomplete="username" />
+          </label>
+          <label>Correo<input type="email" name="email" required autocomplete="email" /></label>
+          <label>Contraseña (mínimo 6 caracteres)<input type="password" name="password" required minlength="6" autocomplete="new-password" /></label>
+          <label>Repite la contraseña<input type="password" name="password2" required minlength="6" autocomplete="new-password" /></label>
+          <button class="btn primary" type="submit" id="register-submit">Enviar código</button>
+        </form>
+
+        <form id="code-form" class="form hidden">
+          <p>Te he enviado un <strong>código de 6 cifras</strong> a <strong id="code-email"></strong>.
+            Mira también en spam.</p>
+          <label>Código de verificación
+            <input name="code" required inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" placeholder="123456" class="code-input" />
+          </label>
+          <button class="btn primary" type="submit">Crear cuenta</button>
+          <div class="actions">
+            <button class="link" type="button" id="resend-code">Reenviar código</button>
+            <button class="link" type="button" id="back-register">Cambiar datos</button>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <!-- ============ VISTA DE AMIGO ============ -->
+    <section id="client-view" class="hidden">
+      <div id="verify-banner" class="card warn hidden">
+        <strong>Verifica tu correo</strong> <span id="verify-why">para poder hacer pedidos</span>.
+        Te hemos enviado un enlace. Cuando lo pulses, recarga la página.
+        <button id="resend-verify" class="btn small">Reenviar correo</button>
+      </div>
+
+      <h2 class="section-title">🔥 Ofertas</h2>
+      <div id="offers" class="offers"></div>
+
+      <div class="card">
+        <h2>Nuevo pedido</h2>
+        <form id="order-form" class="form">
+          <div class="field-title">Elige productos</div>
+          <div id="products" class="products"></div>
+
+          <label>¿Algo más o algún detalle? (color, tamaño, otra figura…)
+            <textarea name="description" rows="3" maxlength="1000"
+              placeholder="Ej: Un Fennec rojo y otro azul. O cualquier otra cosa que quieras."></textarea>
+          </label>
+
+          <label>Oferta
+            <select name="offer" id="offer-select">
+              <option value="">Sin oferta</option>
+            </select>
+          </label>
+
+          <label class="check">
+            <input type="checkbox" name="keychain" />
+            <span>Versión <strong>llavero</strong> <em id="keychain-price"></em></span>
+          </label>
+
+          <label>Código de apoyo (opcional)
+            <input name="promoCode" maxlength="30" autocomplete="off" placeholder="Si tienes uno, ponlo aquí" />
+          </label>
+          <div id="code-msg" class="code-msg"></div>
+
+          <div id="order-summary" class="summary hidden"></div>
+
+          <p class="muted small">💶 Solo pago en efectivo al recoger. Te diré el precio, la hora y el sitio cuando acepte el pedido.</p>
+          <button class="btn primary" type="submit">Enviar pedido</button>
+        </form>
+      </div>
+
+      <h2 class="section-title">📦 Mis pedidos</h2>
+      <div id="my-orders" class="list"></div>
+    </section>
+
+    <!-- ============ PANEL ADMIN ============ -->
+    <section id="admin-view" class="hidden">
+      <h2 class="section-title">🛠️ Panel de administrador</h2>
+
+      <div class="card notify">
+        <div>
+          <strong>🔔 Avisos de pedidos nuevos</strong>
+          <div class="muted small" id="notify-status">Con esta página abierta, te suena y te sale una notificación cada vez que alguien pide algo.</div>
+        </div>
+        <button id="notify-btn" class="btn primary">Activar avisos</button>
+      </div>
+
+      <div class="card filament">
+        <div>
+          <strong>🧵 ¿Te has quedado sin filamento?</strong>
+          <div class="muted small">Cancela de golpe todos los pedidos pendientes y aceptados que aún no has marcado como listos. Tus amigos lo verán en sus pedidos.</div>
+        </div>
+        <button id="no-filament" class="btn bad">Me he quedado sin filamento</button>
+      </div>
+
+      <div id="stats" class="stats"></div>
+
+      <div class="tabs admin-tabs">
+        <button class="tab active" data-admin-tab="orders">Pedidos</button>
+        <button class="tab" data-admin-tab="accounts">Cuentas (pagos)</button>
+        <button class="tab" data-admin-tab="prices">Precios</button>
+        <button class="tab" data-admin-tab="codes">Códigos</button>
+      </div>
+
+      <div id="admin-orders" data-admin-panel="orders">
+        <div class="filters">
+          <select id="status-filter">
+            <option value="activos">Activos (pendientes, aceptados, listos)</option>
+            <option value="pendiente">Pendientes</option>
+            <option value="aceptado">Aceptados</option>
+            <option value="listo">Listos para recoger</option>
+            <option value="entregado">Entregados</option>
+            <option value="debe">Sin pagar</option>
+            <option value="cerrados">Rechazados / cancelados</option>
+            <option value="todos">Todos</option>
+          </select>
+          <input id="search" type="search" placeholder="Buscar por nombre, correo o texto…" />
+        </div>
+        <div id="admin-order-list" class="list"></div>
+      </div>
+
+      <div id="admin-accounts" data-admin-panel="accounts" class="hidden"></div>
+      <div id="admin-prices" data-admin-panel="prices" class="hidden"></div>
+      <div id="admin-codes" data-admin-panel="codes" class="hidden"></div>
+    </section>
+  </main>
+
+  <datalist id="places-list"></datalist>
+  <div id="toast" class="toast hidden"></div>
+
+  <div id="rick" class="rick hidden" role="dialog" aria-label="Sorpresa">
+    <div class="rick-box">
+      <div id="rick-frame" class="rick-frame"></div>
+      <div class="rick-count">Tu descuento llega en <span id="rick-count">5</span>…</div>
+    </div>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
