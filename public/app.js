@@ -10,7 +10,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {
   firebaseConfig, SITE_NAME, PRICE_NOTICE, EMAILJS, ADMIN_EMAIL, COOWNER_EMAILS, ROLE_SEEDS, KEYCHAIN_EXTRA, PRODUCTS, PROMO_CODES, OFFERS, PICKUP_PLACES,
-} from "./config.js";
+} from "./config.js?v=__V__";
 
 // ---------------------------------------------------------------- utilidades
 const $ = (s, el = document) => el.querySelector(s);
