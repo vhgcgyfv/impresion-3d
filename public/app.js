@@ -10,7 +10,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {
   firebaseConfig, SITE_NAME, PRICE_NOTICE, EMAILJS, ADMIN_EMAIL, COOWNER_EMAILS, ROLE_SEEDS, KEYCHAIN_EXTRA, PRODUCTS, PROMO_CODES, OFFERS, PICKUP_PLACES,
-} from "./config.js";
+} from "./config.js?v=__V__";
 
 // ---------------------------------------------------------------- utilidades
 const $ = (s, el = document) => el.querySelector(s);
@@ -276,6 +276,68 @@ async function withBusy(btn, fn) {
   try { await fn(); } catch (e) { toast(authError(e), true); } finally { if (btn) btn.disabled = false; }
 }
 
+// ---------------------------------------------------------------- emojis personalizables
+// El dueño puede cambiar cualquier emoji de la web (settings/emojis = { map: { "🔥": "🌟" } }).
+// Se cambian en el texto que se ve, nunca en lo que escribe la gente.
+const EMOJI_INFO = [
+  ["🧊", "Logo de la web y productos"], ["🔥", "Ofertas"], ["💶", "Pago en efectivo y pagos"],
+  ["💬", "Chat y notas para el cliente"], ["📦", "Pedidos, stock y «listo para recoger»"], ["🛒", "Pedido nuevo"],
+  ["✅", "Aceptado, pagado y confirmaciones"], ["❌", "Rechazado y agotado"], ["🚫", "Cancelado, baneado y bloqueado"],
+  ["⏳", "Pendiente"], ["🤝", "Entregado y co-dueño"], ["👑", "Dueño"], ["🔑", "Versión llavero"],
+  ["🏷️", "Códigos de apoyo"], ["🕒", "Hora de recogida"], ["📍", "Sitio de recogida"], ["📸", "«Cómo va» con fotos"],
+  ["📷", "Añadir fotos"], ["🖨️", "Progreso de impresión"], ["🔔", "Avisos de pedidos nuevos"], ["🔕", "Desactivar avisos"],
+  ["📢", "Avisos de la web"], ["📊", "Analíticas"], ["👥", "Roles"], ["👤", "Cuenta y cliente"], ["🧵", "Sin filamento"],
+  ["🛠️", "Panel de administrador"], ["🎁", "Regalo, sorpresa y ofertas"], ["🎉", "Celebración y descuentos"],
+  ["😂", "Rickroll («¡Te la he colado!»)"], ["📧", "Correos"], ["👋", "Saludos"], ["➕", "Añadir"], ["↩️", "Deshacer y volver"],
+  ["🗑️", "Borrar"], ["📒", "Resumen de cuentas"], ["⚠️", "Atención"], ["👆", "Toca aquí"], ["😅", "Mensaje gracioso"],
+  ["😢", "Mensaje triste (sin filamento)"], ["⚙️", "Configuración"], ["🔴", "Aviso rojo"], ["🟡", "Aviso amarillo"],
+  ["🟢", "Aviso verde"], ["🔵", "Aviso azul"], ["😀", "Pestaña de emojis"],
+];
+const normEmoji = (e) => (e || "").replace(/️/g, "");
+let emojiMap = {};
+let emojiRe = null;
+const EMOJI_SKIP = "textarea, input, select, script, style, .msg, .order-desc, .update .txt, .chat-item .ci-last, #admin-emojis, [data-no-emoji]";
+function buildEmojiRe() {
+  const keys = Object.keys(emojiMap).filter((k) => emojiMap[k] && emojiMap[k] !== k)
+    .sort((a, b) => b.length - a.length)
+    .map((k) => k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\ufe0f?");
+  emojiRe = keys.length ? new RegExp(keys.join("|"), "gu") : null;
+}
+const swapEmoji = (s) => (emojiRe && s ? s.replace(emojiRe, (m) => emojiMap[normEmoji(m)] || m) : s);
+function applyEmojis(root) {
+  if (!emojiRe || !root) return;
+  if (root.nodeType === 3) {
+    if (root.parentElement && !root.parentElement.closest(EMOJI_SKIP)) {
+      const v = swapEmoji(root.nodeValue);
+      if (v !== root.nodeValue) root.nodeValue = v;
+    }
+    return;
+  }
+  if (root.nodeType !== 1 || root.closest(EMOJI_SKIP)) return;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    if (n.parentElement.closest(EMOJI_SKIP)) continue;
+    const v = swapEmoji(n.nodeValue);
+    if (v !== n.nodeValue) n.nodeValue = v;
+  }
+  [root, ...root.querySelectorAll("[placeholder], [aria-label], [title], [data-tip]")].forEach((el) => {
+    if (el.closest(EMOJI_SKIP)) return;
+    ["placeholder", "aria-label", "title", "data-tip"].forEach((a) => {
+      const v = el.getAttribute?.(a);
+      if (v) { const nv = swapEmoji(v); if (nv !== v) el.setAttribute(a, nv); }
+    });
+  });
+}
+new MutationObserver((muts) => {
+  if (!emojiRe) return;
+  muts.forEach((m) => {
+    if (m.type === "characterData") applyEmojis(m.target);
+    else m.addedNodes.forEach(applyEmojis);
+  });
+  const t = swapEmoji(document.title);
+  if (t !== document.title) document.title = t;
+}).observe(document.body, { childList: true, subtree: true, characterData: true });
+
 // ---------------------------------------------------------------- arranque
 // Avisos de arriba del todo. Se editan en el panel (settings/notices);
 // mientras no haya ninguno guardado se usa PRICE_NOTICE de config.js
@@ -438,6 +500,22 @@ function start() {
     codeInput.blur();
     if (info.rickroll) rickroll(apply); else apply();
   });
+
+  // Emojis personalizados en directo (si cambian, se recarga para aplicarlos desde cero)
+  let emojisLoaded = false;
+  onSnapshot(doc(db, "settings", "emojis"), (snap) => {
+    if (snap.metadata.hasPendingWrites) return; // esperar a que se guarde de verdad
+    const map = snap.exists() ? (snap.data().map || {}) : {};
+    if (emojisLoaded) {
+      if (JSON.stringify(map) !== JSON.stringify(emojiMap)) location.reload();
+      return;
+    }
+    emojisLoaded = true;
+    emojiMap = map;
+    buildEmojiRe();
+    applyEmojis(document.body);
+    document.title = swapEmoji(document.title);
+  }, (e) => console.error(e));
 
   // Avisos en directo
   onSnapshot(doc(db, "settings", "notices"), (snap) => {
@@ -768,14 +846,21 @@ function start() {
       }, () => {}));
     }
     const emailIsAdmin = Boolean(emailRole);
-    if (emailIsAdmin && !user.emailVerified) {
-      // ¿ya ha abierto el enlace? actualizar sin tener que salir y entrar
+    // ¿Su permiso (token) ya dice «correo verificado»? Es lo que comprueban las reglas.
+    let verifiedNow = false;
+    try { verifiedNow = (await user.getIdTokenResult()).claims.email_verified === true; } catch (e) { console.error(e); }
+    if (emailIsAdmin && !verifiedNow && !registering) {
+      // ¿ya ha abierto el enlace? renovar el permiso sin tener que salir y entrar
+      // (no durante el registro: renovar la sesión cortaría el guardado del perfil)
       try {
         await user.reload();
-        if (auth.currentUser?.emailVerified) await auth.currentUser.getIdToken(true);
+        if (auth.currentUser?.emailVerified) {
+          await auth.currentUser.getIdToken(true);
+          location.reload(); // empezar de cero con el permiso nuevo
+          return;
+        }
       } catch (e) { console.error(e); }
     }
-    const verifiedNow = Boolean(auth.currentUser?.emailVerified);
     if (emailRole === "coowner" && !verifiedNow) {
       // mandarle solo el enlace para activar el rango (como mucho una vez al día)
       const key = "rankLink:" + user.uid;
@@ -1093,6 +1178,7 @@ function start() {
   $("#search").addEventListener("input", renderAdminOrders);
 
   function renderAdmin() {
+    renderEmojiEditor();
     renderPricesEditor();
     renderNoticeEditor();
     renderAnalytics();
@@ -1771,6 +1857,60 @@ function start() {
       .filter((o) => ["cancelado", "rechazado"].includes(o.status) && o.fromStock && !o.stockReturned)
       .forEach(returnStockOf);
   }
+
+  // ---------- Emojis: cambiar cualquier emoji de la web ----------
+  let emojisDirty = false;
+  function emojiList() {
+    const seen = new Set();
+    const out = [];
+    const add = (e, label) => {
+      const k = normEmoji(e);
+      if (!k || seen.has(k)) return;
+      seen.add(k);
+      out.push({ e: k, label });
+    };
+    catalog.forEach((p) => p.emoji && add(p.emoji, `Producto: ${p.name}`));
+    OFFERS.forEach((o) => [...new Intl.Segmenter("es", { granularity: "grapheme" }).segment(o.emoji || "")]
+      .forEach((g) => add(g.segment, `Oferta: ${o.title}`)));
+    EMOJI_INFO.forEach(([e, label]) => add(e, label));
+    return out;
+  }
+  function renderEmojiEditor() {
+    if (emojisDirty || !$("#emoji-rows")) return;
+    const q = ($("#emoji-search").value || "").trim().toLowerCase();
+    $("#emoji-rows").innerHTML = emojiList()
+      .filter((x) => !q || x.label.toLowerCase().includes(q) || x.e.includes(q))
+      .map((x) => `
+        <div class="emoji-row" data-emoji="${esc(x.e)}">
+          <span class="em-orig" title="Original">${esc(x.e)}</span>
+          <span class="em-arrow">→</span>
+          <input class="em-new" maxlength="16" value="${esc(emojiMap[x.e] || "")}" placeholder="${esc(x.e)}" aria-label="Nuevo emoji para ${esc(x.label)}" />
+          <span class="em-label">${esc(x.label)}</span>
+        </div>`).join("");
+  }
+  $("#emoji-search").addEventListener("input", () => { if (!emojisDirty) renderEmojiEditor(); else {
+    const q = $("#emoji-search").value.trim().toLowerCase();
+    $$("#emoji-rows .emoji-row").forEach((r) => show(r, !q || r.textContent.toLowerCase().includes(q)));
+  } });
+  $("#emoji-rows").addEventListener("input", () => { emojisDirty = true; });
+  $("#save-emojis").addEventListener("click", (e) => withBusy(e.currentTarget, async () => {
+    const map = { ...emojiMap };
+    $$("#emoji-rows .emoji-row").forEach((r) => {
+      const k = r.dataset.emoji;
+      const v = r.querySelector(".em-new").value.trim();
+      if (v && v !== k) map[k] = v; else delete map[k];
+    });
+    emojisDirty = false;
+    await setDoc(doc(db, "settings", "emojis"), { map, updatedAt: serverTimestamp() });
+    toast("😀 Emojis guardados. La web se recarga para aplicarlos…");
+  }));
+  $("#reset-emojis").addEventListener("click", (e) => {
+    if (!confirm("¿Volver todos los emojis a los originales?")) return;
+    withBusy(e.currentTarget, async () => {
+      emojisDirty = false;
+      await setDoc(doc(db, "settings", "emojis"), { map: {}, updatedAt: serverTimestamp() });
+    });
+  });
 
   // ---------- Avisos: editar desde el panel ----------
   let noticesDirty = false;

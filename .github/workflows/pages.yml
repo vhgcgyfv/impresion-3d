@@ -23,6 +23,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
+      # cada versión carga sus propios archivos (evita mezclar con los de la caché)
+      - name: Poner la versión en los enlaces
+        run: sed -i "s/__V__/${GITHUB_SHA::8}/g" public/index.html public/app.js
       - uses: actions/upload-pages-artifact@v3
         with:
           path: public

@@ -18,6 +18,7 @@ Web para que tus amigos te pidan impresiones 3D:
   - **Chats**: cada amigo tiene su chat privado contigo (botón «💬 Chat»). Tú los ves todos en la pestaña Chats y puedes mandar fotos. Avisa con sonido/notificación y contador de no leídos.
   - **📊 Analíticas**: pedidos, dinero cobrado y pendiente, ticket medio, clientes, cancelaciones y cuentas nuevas; gráficas de pedidos por día, productos más pedidos y mejores clientes (7/30/90 días o todo).
   - **📢 Avisos**: edita los avisos de arriba del todo (título, texto, color y encendido/apagado). Se guardan en Firebase; `PRICE_NOTICE` de `config.js` solo se usa mientras no hayas guardado ninguno.
+  - **😀 Emojis**: cambia cualquier emoji de la web (botones, estados, productos, ofertas…) para todo el mundo. Lo que escribe la gente no se toca.
   - **Sin filamento**: un botón que cancela de golpe todos los pedidos pendientes y aceptados que aún no has marcado como listos (tus amigos ven el aviso).
   - **Stock**: en Precios, cuántas unidades tienes hechas de cada producto (vacío = sin límite, 0 = agotado). Baja solo con cada pedido y vuelve al momento si se cancela o rechaza.
   - **Precios**: cambia el precio de cada producto y del llavero, añade o quita productos. Tus amigos ven los precios nuevos al momento.
