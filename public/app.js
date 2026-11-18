@@ -76,7 +76,7 @@ const MAX_PHOTOS = 4;
 const PHOTO_BUDGET = 210000; // ~210 KB por foto: 4 caben en un documento
 
 // Reduce y comprime una foto en el navegador (las fotos del móvil pesan mucho)
-async function compressImage(file) {
+async function compressImage(file, { side: maxSide = 1280, budget = PHOTO_BUDGET } = {}) {
   let src;
   try {
     src = await createImageBitmap(file, { imageOrientation: "from-image" });
@@ -89,7 +89,7 @@ async function compressImage(file) {
     });
   }
   const canvas = document.createElement("canvas");
-  let side = 1280;
+  let side = maxSide;
   for (let attempt = 0; attempt < 6; attempt++) {
     const w0 = src.width, h0 = src.height;
     const k = Math.min(1, side / Math.max(w0, h0));
@@ -101,7 +101,7 @@ async function compressImage(file) {
     ctx.drawImage(src, 0, 0, canvas.width, canvas.height);
     for (const q of [0.8, 0.7, 0.6, 0.5]) {
       const url = canvas.toDataURL("image/jpeg", q);
-      if (url.length <= PHOTO_BUDGET) return url;
+      if (url.length <= budget) return url;
     }
     side = Math.round(side * 0.75);
   }
@@ -240,7 +240,9 @@ function start() {
     $("#keychain-price").textContent = `(+${money(keychainExtra)})`;
     $("#products").innerHTML = catalog.length ? catalog.map((p) => `
     <div class="product">
-      <div class="p-emoji">${esc(p.emoji)}</div>
+      ${p.photo && PHOTO_RE.test(p.photo)
+        ? `<img class="p-photo" src="${p.photo}" alt="${esc(p.name)}" data-zoom />`
+        : `<div class="p-emoji">${esc(p.emoji)}</div>`}
       <div class="p-info"><strong>${esc(p.name)}</strong><span class="muted small">${money(p.price)}</span></div>
       <div class="stepper">
         <button type="button" class="btn small" data-step="-1" data-pid="${esc(p.id)}" aria-label="Quitar">−</button>
@@ -1194,9 +1196,16 @@ function start() {
 
   // ---------- Precios (editables por el admin) ----------
   let pricesDirty = false;
+  function photoCell(photo, emoji) {
+    return photo
+      ? `<img src="${photo}" alt="Foto del producto" /><span class="p-rm" data-rm-pphoto title="Quitar foto">✕</span>`
+      : `<span class="p-add">📷</span>`;
+  }
   function priceRow(p) {
-    return `<div class="price-row" data-row>
-      <input name="emoji" value="${esc(p.emoji || "")}" maxlength="8" aria-label="Emoji" class="emoji-in" />
+    const photo = p.photo && PHOTO_RE.test(p.photo) ? p.photo : "";
+    return `<div class="price-row" data-row data-photo="${photo}">
+      <button type="button" class="p-pick" data-pick-pphoto aria-label="Poner foto del producto">${photoCell(photo)}</button>
+      <input name="emoji" value="${esc(p.emoji || "")}" maxlength="8" aria-label="Emoji (si no hay foto)" class="emoji-in" ${photo ? "hidden" : ""} />
       <input name="name" value="${esc(p.name || "")}" maxlength="40" placeholder="Nombre" aria-label="Nombre" />
       <label class="euro"><input name="price" type="number" min="0" step="0.01" inputmode="decimal" value="${p.price ?? ""}" aria-label="Precio" /> €</label>
       <input name="id" type="hidden" value="${esc(p.id || "")}" />
@@ -1223,9 +1232,34 @@ function start() {
   const slug = (t) => t.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
     .replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 30) || "producto";
 
+  // Fotos de productos: una entrada de archivo compartida para todas las filas
+  const pPhotoInput = Object.assign(document.createElement("input"), { type: "file", accept: "image/*", hidden: true });
+  document.body.appendChild(pPhotoInput);
+  let pPhotoRow = null;
+  function setRowPhoto(row, photo) {
+    row.dataset.photo = photo;
+    row.querySelector("[data-pick-pphoto]").innerHTML = photoCell(photo);
+    row.querySelector("[name=emoji]").hidden = Boolean(photo);
+    pricesDirty = true;
+  }
+  pPhotoInput.addEventListener("change", async () => {
+    const file = pPhotoInput.files[0];
+    pPhotoInput.value = "";
+    if (!file || !pPhotoRow) return;
+    try {
+      setRowPhoto(pPhotoRow, await compressImage(file, { side: 480, budget: 60000 }));
+      toast("📷 Foto puesta. Pulsa «Guardar precios» para que la vean.");
+    } catch (err) { toast(err.message, true); }
+  });
+
   $("#admin-prices").addEventListener("input", () => { pricesDirty = true; });
   $("#admin-prices").addEventListener("click", (e) => {
-    if (e.target.closest("#add-product")) {
+    if (e.target.closest("[data-rm-pphoto]")) {
+      setRowPhoto(e.target.closest("[data-row]"), "");
+    } else if (e.target.closest("[data-pick-pphoto]")) {
+      pPhotoRow = e.target.closest("[data-row]");
+      pPhotoInput.click();
+    } else if (e.target.closest("#add-product")) {
       pricesDirty = true;
       $("#price-rows").insertAdjacentHTML("beforeend", priceRow({ emoji: "🧊", name: "", price: "" }));
       $("#price-rows [data-row]:last-child [name=name]").focus();
@@ -1246,8 +1280,12 @@ function start() {
           let id = r.querySelector("[name=id]").value || slug(name);
           while (used.has(id)) id += "-2";
           used.add(id);
-          return { id, name, emoji: r.querySelector("[name=emoji]").value.trim(), price: round2(price) };
+          const photo = PHOTO_RE.test(r.dataset.photo || "") ? r.dataset.photo : "";
+          return { id, name, emoji: r.querySelector("[name=emoji]").value.trim(), price: round2(price), ...(photo && { photo }) };
         });
+        if (JSON.stringify(products).length > 900000) {
+          throw new Error("Hay demasiadas fotos de productos. Quita alguna.");
+        }
         const k = parseFloat($("#keychain-extra").value.replace(",", "."));
         if (isNaN(k) || k < 0) throw new Error("Pon un precio válido al llavero.");
         pricesDirty = false;
