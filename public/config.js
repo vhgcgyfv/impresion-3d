@@ -27,6 +27,7 @@ export const KEYCHAIN_EXTRA = 0.10;
 export const PRODUCTS = [
   { id: "fennec", emoji: "🚗", name: "Fennec", price: 0.50 },
   { id: "balon", emoji: "⚽", name: "Balón", price: 0.25 },
+  { id: "octane", emoji: "🏎️", name: "Octane", price: 0.75 },
 ];
 
 // 6) Códigos de apoyo válidos (en minúsculas).
