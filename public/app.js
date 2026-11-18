@@ -6,7 +6,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
   getFirestore, connectFirestoreEmulator, collection, addDoc, doc, setDoc, getDoc, updateDoc, deleteDoc, writeBatch,
-  query, where, orderBy, onSnapshot, serverTimestamp,
+  query, where, orderBy, onSnapshot, serverTimestamp, increment,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {
   firebaseConfig, SITE_NAME, EMAILJS, ADMIN_EMAIL, KEYCHAIN_EXTRA, PRODUCTS, PROMO_CODES, OFFERS, PICKUP_PLACES,
@@ -68,6 +68,65 @@ function breakdownHtml(c, { showSubtotal = true } = {}) {
   if (c.extra) rows.push(["🔑 Llavero", "+" + money(c.extra)]);
   if (c.pct) rows.push([`🏷️ Código (−${c.pct}%)`, "−" + money(c.codeDiscount)]);
   return rows.map(([a, b]) => `<div class="row"><span>${a}</span><span>${b}</span></div>`).join("");
+}
+
+// ---------------------------------------------------------------- fotos y novedades
+const PHOTO_RE = /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/;
+const MAX_PHOTOS = 4;
+const PHOTO_BUDGET = 210000; // ~210 KB por foto: 4 caben en un documento
+
+// Reduce y comprime una foto en el navegador (las fotos del móvil pesan mucho)
+async function compressImage(file, { side: maxSide = 1280, budget = PHOTO_BUDGET } = {}) {
+  let src;
+  try {
+    src = await createImageBitmap(file, { imageOrientation: "from-image" });
+  } catch {
+    src = await new Promise((res, rej) => {
+      const img = new Image();
+      img.onload = () => res(img);
+      img.onerror = () => rej(new Error("No se ha podido leer esa foto."));
+      img.src = URL.createObjectURL(file);
+    });
+  }
+  const canvas = document.createElement("canvas");
+  let side = maxSide;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const w0 = src.width, h0 = src.height;
+    const k = Math.min(1, side / Math.max(w0, h0));
+    canvas.width = Math.round(w0 * k);
+    canvas.height = Math.round(h0 * k);
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(src, 0, 0, canvas.width, canvas.height);
+    for (const q of [0.8, 0.7, 0.6, 0.5]) {
+      const url = canvas.toDataURL("image/jpeg", q);
+      if (url.length <= budget) return url;
+    }
+    side = Math.round(side * 0.75);
+  }
+  throw new Error("Esa foto es demasiado grande.");
+}
+
+function progressHtml(o) {
+  if (o.progress == null || !BILLABLE.includes(o.status) || o.status === "entregado") return "";
+  const p = Math.max(0, Math.min(100, Number(o.progress) || 0));
+  return `<div class="progress-wrap">
+    <div class="small"><strong>🖨️ Progreso: ${p}%</strong></div>
+    <div class="progress" role="progressbar" aria-valuenow="${p}" aria-valuemin="0" aria-valuemax="100"><div style="width:${p}%"></div></div>
+  </div>`;
+}
+
+function updatesHtml(list, { admin = false, orderId = "" } = {}) {
+  if (!list?.length) return admin ? `<div class="muted small">Todavía no has publicado nada.</div>` : "";
+  return list.map((u) => `
+    <div class="update">
+      <div class="when"><span>${fmtDate(u.createdAt)}${u.progress != null ? ` · ${Number(u.progress) || 0}%` : ""}</span>
+        ${admin ? `<button type="button" class="btn bad small" data-del-upd="${esc(u.id)}" data-order="${esc(orderId)}">Borrar</button>` : ""}</div>
+      ${u.text ? `<div class="txt">${esc(u.text)}</div>` : ""}
+      ${(u.photos || []).filter((p) => PHOTO_RE.test(p)).length ? `<div class="photos">${u.photos.filter((p) => PHOTO_RE.test(p))
+        .map((p) => `<img src="${p}" alt="Foto del pedido" loading="lazy" data-zoom />`).join("")}</div>` : ""}
+    </div>`).join("");
 }
 
 // ---------------------------------------------------------------- rickroll
@@ -181,7 +240,9 @@ function start() {
     $("#keychain-price").textContent = `(+${money(keychainExtra)})`;
     $("#products").innerHTML = catalog.length ? catalog.map((p) => `
     <div class="product">
-      <div class="p-emoji">${esc(p.emoji)}</div>
+      ${p.photo && PHOTO_RE.test(p.photo)
+        ? `<img class="p-photo" src="${p.photo}" alt="${esc(p.name)}" data-zoom />`
+        : `<div class="p-emoji">${esc(p.emoji)}</div>`}
       <div class="p-info"><strong>${esc(p.name)}</strong><span class="muted small">${money(p.price)}</span></div>
       <div class="stepper">
         <button type="button" class="btn small" data-step="-1" data-pid="${esc(p.id)}" aria-label="Quitar">−</button>
@@ -448,6 +509,9 @@ function start() {
     unsubs.forEach((u) => u());
     unsubs = [];
     firstOrdersLoad = true;
+    Object.values(updUnsubs).forEach((u) => u());
+    updUnsubs = {};
+    updatesCache = {};
     currentUser = user;
     show($("#loading"), false);
 
@@ -488,6 +552,7 @@ function start() {
       query(collection(db, "orders"), where("uid", "==", user.uid)),
       (snap) => {
         myOrders = snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => ms(b) - ms(a));
+        syncUpdateListeners();
         renderMyOrders();
       },
       (e) => toast(authError(e), true),
@@ -576,6 +641,36 @@ function start() {
     }).catch(() => {});
   }
 
+  // ---------- Novedades de mis pedidos (fotos y "cómo va") ----------
+  let updUnsubs = {};
+  let updatesCache = {};
+  function syncUpdateListeners() {
+    myOrders.filter((o) => o.updatesCount > 0 && !updUnsubs[o.id]).forEach((o) => {
+      let first = true;
+      updUnsubs[o.id] = onSnapshot(
+        query(collection(db, "orders", o.id, "updates"), where("uid", "==", currentUser.uid)),
+        (snap) => {
+          updatesCache[o.id] = snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => ms(b) - ms(a));
+          if (!first && snap.docChanges().some((c) => c.type === "added" && !c.doc.metadata.hasPendingWrites)) {
+            toast("📸 ¡Novedad en tu pedido!");
+          }
+          first = false;
+          renderMyOrders();
+        },
+        (e) => console.error(e),
+      );
+    });
+  }
+
+  // Ver foto en grande (en cualquier sitio de la web)
+  document.addEventListener("click", (e) => {
+    const img = e.target.closest("img[data-zoom]");
+    if (!img) return;
+    $("#lightbox img").src = img.src;
+    show($("#lightbox"));
+  });
+  $("#lightbox").addEventListener("click", () => show($("#lightbox"), false));
+
   // ---------- Mis pedidos ----------
   function orderTags(o) {
     const t = [];
@@ -621,7 +716,9 @@ function start() {
         ${o.description ? `<div class="order-desc">${esc(o.description)}</div>` : ""}
         ${orderTags(o)}
         ${pickupBox(o)}
+        ${progressHtml(o)}
         ${o.adminNote ? `<div class="note">💬 ${esc(o.adminNote)}</div>` : ""}
+        ${updatesCache[o.id]?.length ? `<div class="updates-title">📸 Cómo va</div><div class="updates">${updatesHtml(updatesCache[o.id])}</div>` : ""}
         ${o.status === "pendiente" ? `<div class="actions"><button class="btn bad small" data-cancel="${o.id}">Cancelar pedido</button></div>` : ""}
       </div>`).join("");
   }
@@ -743,7 +840,9 @@ function start() {
               ${o.paid ? "↩️ Marcar como NO pagado" : "💶 Marcar como pagado"}</button>
             ${o.status === "aceptado" ? `<button class="btn small" data-act="ready" data-id="${o.id}">📦 Marcar listo</button>` : ""}
             ${o.status !== "entregado" ? `<button class="btn small" data-act="delivered" data-id="${o.id}">🤝 Marcar entregado</button>` : ""}
+            <button class="btn small primary" data-act="updates" data-id="${o.id}">📸 Contar cómo va${o.updatesCount ? ` (${o.updatesCount})` : ""}</button>
           </div>
+          ${progressHtml(o)}
           <details><summary>Editar precio / hora / lugar</summary>${priceForm(o, true)}</details>` : ""}
         <div class="actions">
           ${["rechazado", "cancelado"].includes(o.status) ? `<button class="btn small" data-act="reopen" data-id="${o.id}">Volver a pendiente</button>` : ""}
@@ -831,6 +930,9 @@ function start() {
           break;
         case "reopen":
           await updateDoc(ref, { status: "pendiente" });
+          break;
+        case "updates":
+          openUpdates(o);
           break;
         case "delete":
           if (!confirm("¿Borrar este pedido para siempre?")) return;
@@ -972,6 +1074,103 @@ function start() {
     if (document.hidden || !document.hasFocus()) { unseen += added.length; setTitleBadge(); }
   }
 
+  // ---------- Contar cómo va un pedido (texto, progreso y fotos) ----------
+  let updOrder = null;
+  let updUnsub = null;
+  let updPhotos = [];
+  const updForm = $("#upd-form");
+
+  function renderUpdPreviews() {
+    $("#upd-previews").innerHTML = updPhotos.map((p, i) => `
+      <div class="thumb"><img src="${p}" alt="Foto ${i + 1}" /><button type="button" data-rm-photo="${i}" aria-label="Quitar foto">✕</button></div>`).join("");
+  }
+
+  function openUpdates(o) {
+    updOrder = o;
+    updPhotos = [];
+    updForm.reset();
+    updForm.progress.value = o.progress ?? 0;
+    $("#upd-pct").textContent = `${updForm.progress.value}%`;
+    $("#upd-order").textContent = `${o.userName} · #${shortId(o.id)} · ${itemsText(o.items) || (o.description || "").slice(0, 60)}`;
+    renderUpdPreviews();
+    $("#upd-list").innerHTML = `<div class="muted small">Cargando…</div>`;
+    show($("#upd-modal"));
+    updUnsub?.();
+    updUnsub = onSnapshot(collection(db, "orders", o.id, "updates"), (snap) => {
+      const list = snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => ms(b) - ms(a));
+      $("#upd-list").innerHTML = updatesHtml(list, { admin: true, orderId: o.id });
+    }, (e) => toast(authError(e), true));
+  }
+  function closeUpdates() {
+    updUnsub?.();
+    updUnsub = null;
+    updOrder = null;
+    show($("#upd-modal"), false);
+  }
+  $("#upd-close").addEventListener("click", closeUpdates);
+  $("#upd-modal").addEventListener("click", (e) => { if (e.target.id === "upd-modal") closeUpdates(); });
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    if (!$("#lightbox").classList.contains("hidden")) show($("#lightbox"), false);
+    else if (updOrder) closeUpdates();
+  });
+  updForm.progress.addEventListener("input", () => { $("#upd-pct").textContent = `${updForm.progress.value}%`; });
+
+  $("#upd-files").addEventListener("change", async (e) => {
+    const files = [...e.target.files];
+    e.target.value = "";
+    const room = MAX_PHOTOS - updPhotos.length;
+    if (files.length > room) toast(`Solo caben ${MAX_PHOTOS} fotos por publicación.`, true);
+    for (const f of files.slice(0, Math.max(0, room))) {
+      try { updPhotos.push(await compressImage(f)); } catch (err) { toast(err.message, true); }
+      renderUpdPreviews();
+    }
+  });
+  $("#upd-previews").addEventListener("click", (e) => {
+    const i = e.target.closest("[data-rm-photo]")?.dataset.rmPhoto;
+    if (i == null) return;
+    updPhotos.splice(Number(i), 1);
+    renderUpdPreviews();
+  });
+
+  updForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const o = updOrder;
+    if (!o) return;
+    const text = updForm.text.value.trim().slice(0, 500);
+    const progress = Number(updForm.progress.value);
+    const progressChanged = progress !== (o.progress ?? 0);
+    if (!text && !updPhotos.length && !progressChanged) {
+      return toast("Escribe algo, añade una foto o cambia el progreso.", true);
+    }
+    withBusy(updForm.querySelector("button[type=submit]"), async () => {
+      const b = writeBatch(db);
+      b.set(doc(collection(db, "orders", o.id, "updates")), {
+        uid: o.uid, text, photos: updPhotos, progress, createdAt: serverTimestamp(),
+      });
+      b.update(doc(db, "orders", o.id), {
+        progress, updatesCount: increment(1), lastUpdateAt: serverTimestamp(),
+      });
+      await b.commit();
+      o.progress = progress;
+      updPhotos = [];
+      updForm.text.value = "";
+      renderUpdPreviews();
+      toast(`📸 Publicado. ${o.userName} lo verá en su pedido.`);
+    });
+  });
+
+  $("#upd-list").addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-del-upd]");
+    if (!btn || !confirm("¿Borrar esta publicación?")) return;
+    withBusy(btn, async () => {
+      const b = writeBatch(db);
+      b.delete(doc(db, "orders", btn.dataset.order, "updates", btn.dataset.delUpd));
+      b.update(doc(db, "orders", btn.dataset.order), { updatesCount: increment(-1) });
+      await b.commit();
+    });
+  });
+
   // ---------- Sin filamento: cancelar todo lo que no está hecho ----------
   $("#no-filament").addEventListener("click", (e) => {
     const targets = allOrders.filter((o) => ["pendiente", "aceptado"].includes(o.status));
@@ -997,9 +1196,16 @@ function start() {
 
   // ---------- Precios (editables por el admin) ----------
   let pricesDirty = false;
+  function photoCell(photo, emoji) {
+    return photo
+      ? `<img src="${photo}" alt="Foto del producto" /><span class="p-rm" data-rm-pphoto title="Quitar foto">✕</span>`
+      : `<span class="p-add">📷</span>`;
+  }
   function priceRow(p) {
-    return `<div class="price-row" data-row>
-      <input name="emoji" value="${esc(p.emoji || "")}" maxlength="8" aria-label="Emoji" class="emoji-in" />
+    const photo = p.photo && PHOTO_RE.test(p.photo) ? p.photo : "";
+    return `<div class="price-row" data-row data-photo="${photo}">
+      <button type="button" class="p-pick" data-pick-pphoto aria-label="Poner foto del producto">${photoCell(photo)}</button>
+      <input name="emoji" value="${esc(p.emoji || "")}" maxlength="8" aria-label="Emoji (si no hay foto)" class="emoji-in" ${photo ? "hidden" : ""} />
       <input name="name" value="${esc(p.name || "")}" maxlength="40" placeholder="Nombre" aria-label="Nombre" />
       <label class="euro"><input name="price" type="number" min="0" step="0.01" inputmode="decimal" value="${p.price ?? ""}" aria-label="Precio" /> €</label>
       <input name="id" type="hidden" value="${esc(p.id || "")}" />
@@ -1026,9 +1232,34 @@ function start() {
   const slug = (t) => t.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
     .replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 30) || "producto";
 
+  // Fotos de productos: una entrada de archivo compartida para todas las filas
+  const pPhotoInput = Object.assign(document.createElement("input"), { type: "file", accept: "image/*", hidden: true });
+  document.body.appendChild(pPhotoInput);
+  let pPhotoRow = null;
+  function setRowPhoto(row, photo) {
+    row.dataset.photo = photo;
+    row.querySelector("[data-pick-pphoto]").innerHTML = photoCell(photo);
+    row.querySelector("[name=emoji]").hidden = Boolean(photo);
+    pricesDirty = true;
+  }
+  pPhotoInput.addEventListener("change", async () => {
+    const file = pPhotoInput.files[0];
+    pPhotoInput.value = "";
+    if (!file || !pPhotoRow) return;
+    try {
+      setRowPhoto(pPhotoRow, await compressImage(file, { side: 480, budget: 60000 }));
+      toast("📷 Foto puesta. Pulsa «Guardar precios» para que la vean.");
+    } catch (err) { toast(err.message, true); }
+  });
+
   $("#admin-prices").addEventListener("input", () => { pricesDirty = true; });
   $("#admin-prices").addEventListener("click", (e) => {
-    if (e.target.closest("#add-product")) {
+    if (e.target.closest("[data-rm-pphoto]")) {
+      setRowPhoto(e.target.closest("[data-row]"), "");
+    } else if (e.target.closest("[data-pick-pphoto]")) {
+      pPhotoRow = e.target.closest("[data-row]");
+      pPhotoInput.click();
+    } else if (e.target.closest("#add-product")) {
       pricesDirty = true;
       $("#price-rows").insertAdjacentHTML("beforeend", priceRow({ emoji: "🧊", name: "", price: "" }));
       $("#price-rows [data-row]:last-child [name=name]").focus();
@@ -1049,8 +1280,12 @@ function start() {
           let id = r.querySelector("[name=id]").value || slug(name);
           while (used.has(id)) id += "-2";
           used.add(id);
-          return { id, name, emoji: r.querySelector("[name=emoji]").value.trim(), price: round2(price) };
+          const photo = PHOTO_RE.test(r.dataset.photo || "") ? r.dataset.photo : "";
+          return { id, name, emoji: r.querySelector("[name=emoji]").value.trim(), price: round2(price), ...(photo && { photo }) };
         });
+        if (JSON.stringify(products).length > 900000) {
+          throw new Error("Hay demasiadas fotos de productos. Quita alguna.");
+        }
         const k = parseFloat($("#keychain-extra").value.replace(",", "."));
         if (isNaN(k) || k < 0) throw new Error("Pon un precio válido al llavero.");
         pricesDirty = false;

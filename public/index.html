@@ -178,6 +178,39 @@
   <datalist id="places-list"></datalist>
   <div id="toast" class="toast hidden"></div>
 
+  <!-- Contar cómo va un pedido (admin) -->
+  <div id="upd-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="upd-title">
+    <div class="modal-box">
+      <div class="modal-head">
+        <h3 id="upd-title">📸 Cómo va el pedido</h3>
+        <button type="button" class="btn ghost small" id="upd-close" aria-label="Cerrar">✕</button>
+      </div>
+      <div id="upd-order" class="muted small"></div>
+      <form id="upd-form" class="form">
+        <label>¿Qué tal va?
+          <textarea name="text" rows="3" maxlength="500" placeholder="Ej: Ya está imprimiéndose el primer Fennec 🔥"></textarea>
+        </label>
+        <label>Progreso: <span id="upd-pct">0%</span>
+          <input type="range" name="progress" min="0" max="100" step="5" value="0" />
+        </label>
+        <div class="photo-pick">
+          <label class="btn small" for="upd-files">📷 Añadir fotos</label>
+          <input id="upd-files" type="file" accept="image/*" multiple class="visually-hidden" />
+          <span class="muted small">Hasta 4 fotos</span>
+        </div>
+        <div id="upd-previews" class="photos"></div>
+        <button class="btn primary" type="submit">Publicar</button>
+      </form>
+      <h4>Publicado</h4>
+      <div id="upd-list" class="updates"></div>
+    </div>
+  </div>
+
+  <!-- Ver foto en grande -->
+  <div id="lightbox" class="lightbox hidden" role="dialog" aria-label="Foto">
+    <img alt="Foto del pedido" />
+  </div>
+
   <div id="rick" class="rick hidden" role="dialog" aria-label="Sorpresa">
     <div class="rick-box">
       <div id="rick-frame" class="rick-frame"></div>
