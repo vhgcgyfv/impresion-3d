@@ -416,3 +416,5 @@ body.coowner .owner-only { display: none !important; }
 /* ---------- Roles ---------- */
 #role-list select { width: auto; flex: none; max-width: 48%; }
 #role-list .role { margin-left: 4px; white-space: nowrap; }
+
+.verify-steps { margin: 8px 0 10px; padding-left: 20px; display: grid; gap: 4px; }

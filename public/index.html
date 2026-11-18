@@ -36,7 +36,6 @@
         <p>Crea tu cuenta, escribe lo que quieres y te digo precio, hora y sitio para recogerlo.</p>
         <p class="cash">💶 Solo pago en efectivo al recoger</p>
         <div class="notices" role="region" aria-label="Avisos"></div>
-        <section class="value-box" aria-label="Por qué cuesta lo que cuesta"></section>
       </div>
 
       <div class="card auth-card">
@@ -89,12 +88,16 @@
     <!-- ============ VISTA DE AMIGO ============ -->
     <section id="client-view" class="hidden">
       <div class="notices" role="region" aria-label="Avisos"></div>
-        <section class="value-box" aria-label="Por qué cuesta lo que cuesta"></section>
 
       <div id="verify-banner" class="card warn hidden">
         <strong>Verifica tu correo</strong> <span id="verify-why">para poder hacer pedidos</span>.
-        Te hemos enviado un enlace. Cuando lo pulses, recarga la página.
-        <button id="resend-verify" class="btn small">Reenviar correo</button>
+        <ol class="verify-steps">
+          <li>Abre tu correo (<span id="verify-email"></span>).</li>
+          <li>Busca un correo de <strong>noreply@impresion3d-4bdb7.firebaseapp.com</strong>. Si no está, mira en <strong>Spam</strong> o <strong>Promociones</strong>.</li>
+          <li>Pulsa el <strong>enlace</strong> que viene dentro.</li>
+          <li>Vuelve aquí y <strong>recarga la página</strong>. ¡Listo!</li>
+        </ol>
+        <button id="resend-verify" class="btn small">📧 Reenviar correo</button>
       </div>
 
       <h2 class="section-title">🔥 Ofertas</h2>
