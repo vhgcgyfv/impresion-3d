@@ -17,10 +17,16 @@ service cloud.firestore {
     }
 
     // Co-dueño: gestiona pedidos y chats, pero no el dinero, los precios ni borrar
+    // (ahora mismo no hay co-dueños: para añadir uno, pon su correo en la lista)
     function isCoOwner() {
       return signedIn()
-        && request.auth.token.email == 'martincsurcui@gmail.com'
+        && request.auth.token.email in []
         && request.auth.token.email_verified == true;
+    }
+
+    // Cuentas bloqueadas: no pueden pedir, chatear ni nada
+    function isBanned() {
+      return signedIn() && request.auth.token.email in ['martincsurcui@gmail.com'];
     }
 
     function isStaff() {
@@ -118,6 +124,7 @@ service cloud.firestore {
       allow read: if isStaff() || (signedIn() && request.auth.uid == uid);
       allow create, update: if isStaff()
         || (signedIn()
+            && !isBanned()
             && request.auth.uid == uid
             && request.resource.data.keys().hasOnly([
                  'uid', 'userName', 'userEmail', 'lastText', 'lastAt', 'lastFrom',
@@ -142,6 +149,7 @@ service cloud.firestore {
               && request.resource.data.from == 'admin'
               && request.resource.data.by == (isOwner() ? 'owner' : 'coowner'))
           || (signedIn()
+              && !isBanned()
               && request.auth.uid == uid
               && request.resource.data.keys().hasOnly(['from', 'text', 'createdAt'])
               && request.resource.data.from == 'user'
@@ -159,6 +167,7 @@ service cloud.firestore {
       // Los pedidos entran ya aceptados (sin pagar). El precio calculado va en
       // "estimate"; el precio de verdad ("total") solo lo pone el equipo.
       allow create: if signedIn()
+        && !isBanned()
         && request.resource.data.keys().hasOnly([
              'uid', 'userName', 'userEmail', 'description', 'offer',
              'items', 'keychain', 'promoCode', 'status', 'estimate', 'fromStock', 'paid', 'createdAt'])

@@ -6,7 +6,8 @@ Web para que tus amigos te pidan impresiones 3D:
 - **Pedidos**: eligen productos con precio fijo (**Fennec 0,50 €**, **Balón 0,25 €**), escriben detalles en un cuadro de texto, pueden elegir una **oferta**, la **versión llavero (+0,10 €)** y un **código de apoyo**. Ven el total aproximado al momento.
 - **Código `manchis14`**: al escribirlo sale una sorpresa de 5 segundos 🎵 y luego se aplica un **10 % de descuento**.
 - **Solo pago en efectivo.**
-- **Co-dueño** (`martincsurcui@gmail.com`): gestiona pedidos (aceptar, precio, hora, lugar, estado, «cómo va») y contesta chats con la etiqueta «🤝 Co-dueño». No puede tocar pagos, precios, borrar pedidos ni usar «sin filamento». Se cambia en `COOWNER_EMAILS` (`public/config.js`) **y** en `firestore.rules`.
+- **Co-dueños**: ahora no hay ninguno. Para añadir uno, pon su correo en `COOWNER_EMAILS` (`public/config.js`) **y** en `isCoOwner()` de `firestore.rules`. Gestiona pedidos y chats, pero no pagos, precios ni borrar.
+- **Cuentas bloqueadas**: `BANNED_EMAILS` (`public/config.js`) **y** `isBanned()` en `firestore.rules`. No pueden pedir ni chatear; al entrar ven «Tu cuenta está bloqueada».
 - **Panel de admin** (solo `o39459309@gmail.com`):
   - Los pedidos **entran ya aceptados** con el precio calculado. Tú (o el co-dueño) pones **hora y lugar de recogida**, puedes ajustar el precio y **rechazarlos**. El cliente puede cancelar el suyo mientras no esté listo ni pagado.
   - Marcar pedidos como *listo* / *entregado*.

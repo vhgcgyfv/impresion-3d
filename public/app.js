@@ -9,7 +9,7 @@ import {
   query, where, orderBy, onSnapshot, serverTimestamp, increment, limit, runTransaction,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {
-  firebaseConfig, SITE_NAME, PRICE_NOTICE, EMAILJS, ADMIN_EMAIL, COOWNER_EMAILS, KEYCHAIN_EXTRA, PRODUCTS, PROMO_CODES, OFFERS, PICKUP_PLACES,
+  firebaseConfig, SITE_NAME, PRICE_NOTICE, EMAILJS, ADMIN_EMAIL, COOWNER_EMAILS, BANNED_EMAILS, KEYCHAIN_EXTRA, PRODUCTS, PROMO_CODES, OFFERS, PICKUP_PLACES,
 } from "./config.js";
 
 // ---------------------------------------------------------------- utilidades
@@ -242,6 +242,7 @@ const roleOfEmail = (email) => {
   if ((COOWNER_EMAILS || []).some((x) => x.toLowerCase() === e)) return "coowner";
   return null;
 };
+const isBannedEmail = (email) => (BANNED_EMAILS || []).some((x) => x.toLowerCase() === (email || "").toLowerCase());
 const ROLE_LABEL = { owner: "👑 Dueño", coowner: "🤝 Co-dueño" };
 
 let toastTimer;
@@ -628,6 +629,7 @@ function start() {
   let currentView = "";
   function setView(view) {
     currentView = view;
+    show($("#blocked-view"), view === "blocked");
     show($("#client-view"), view === "client");
     show($("#admin-view"), view === "admin");
     show($("#chat-view"), view === "chat");
@@ -677,6 +679,19 @@ function start() {
     show($("#auth-view"), false);
     show($("#nav"));
 
+    if (isBannedEmail(user.email)) {
+      // cuenta bloqueada: solo puede salir
+      isAdmin = false;
+      myRole = null;
+      show($("#verify-banner"), false);
+      show($("#nav-admin"), false);
+      show($("#nav-chat"), false);
+      show($("#nav-client"), false);
+      $("#nav-user").textContent = user.email;
+      setView("blocked");
+      return;
+    }
+    show($("#nav-client"));
     const emailRole = roleOfEmail(user.email);
     const emailIsAdmin = Boolean(emailRole);
     isAdmin = emailIsAdmin && user.emailVerified;
