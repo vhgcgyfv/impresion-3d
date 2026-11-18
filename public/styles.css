@@ -412,3 +412,7 @@ body.coowner .owner-only { display: none !important; }
 .admin-tabs { overflow-x: auto; scrollbar-width: none; }
 .admin-tabs::-webkit-scrollbar { display: none; }
 .admin-tabs .tab { flex: 0 0 auto; white-space: nowrap; padding: 8px 12px; }
+
+/* ---------- Roles ---------- */
+#role-list select { width: auto; flex: none; max-width: 48%; }
+#role-list .role { margin-left: 4px; white-space: nowrap; }

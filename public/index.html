@@ -174,6 +174,7 @@
         <button class="tab owner-only" data-admin-tab="prices">Precios</button>
         <button class="tab" data-admin-tab="codes" id="codes-tab">Códigos</button>
         <button class="tab owner-only" data-admin-tab="bans">🚫 Ban</button>
+        <button class="tab owner-only" data-admin-tab="roles">👥 Roles</button>
         <button class="tab owner-only" data-admin-tab="stats">📊 Analíticas</button>
         <button class="tab owner-only" data-admin-tab="notices">📢 Avisos</button>
       </div>
@@ -204,6 +205,16 @@
       <div id="admin-accounts" data-admin-panel="accounts" class="hidden owner-only"></div>
       <div id="admin-prices" data-admin-panel="prices" class="hidden owner-only"></div>
       <div id="admin-codes" data-admin-panel="codes" class="hidden"></div>
+      <div id="admin-roles" data-admin-panel="roles" class="hidden owner-only">
+        <div class="card">
+          <h3>👥 Rangos</h3>
+          <p class="muted small"><strong>🤝 Co-dueño</strong>: gestiona pedidos (hora, sitio, precio, estado, «cómo va») y contesta los chats con su etiqueta. No puede tocar pagos, precios, stock, baneos ni borrar.</p>
+          <p class="muted small">📧 Al darle el rango, <strong>le llega solo un enlace a su correo</strong> la próxima vez que entre en la web. Cuando lo abra y recargue, ya tendrá su panel.</p>
+          <input id="role-search" type="search" placeholder="Buscar por nombre o correo…" />
+          <div id="role-list" class="user-list"></div>
+        </div>
+      </div>
+
       <div id="admin-stats" data-admin-panel="stats" class="hidden owner-only">
         <div class="filters an-filters" role="group" aria-label="Periodo">
           <button type="button" class="chip" data-range="7">7 días</button>

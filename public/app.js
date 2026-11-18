@@ -9,7 +9,7 @@ import {
   query, where, orderBy, onSnapshot, serverTimestamp, increment, limit, runTransaction,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {
-  firebaseConfig, SITE_NAME, PRICE_NOTICE, EMAILJS, ADMIN_EMAIL, COOWNER_EMAILS, BANNED_EMAILS, KEYCHAIN_EXTRA, PRODUCTS, PROMO_CODES, OFFERS, PICKUP_PLACES,
+  firebaseConfig, SITE_NAME, PRICE_NOTICE, EMAILJS, ADMIN_EMAIL, COOWNER_EMAILS, ROLE_SEEDS, KEYCHAIN_EXTRA, PRODUCTS, PROMO_CODES, OFFERS, PICKUP_PLACES,
 } from "./config.js";
 
 // ---------------------------------------------------------------- utilidades
@@ -722,14 +722,47 @@ function start() {
       return;
     }
     show($("#nav-client"));
-    const emailRole = roleOfEmail(user.email);
+    // Rango: dueño por su correo; el resto, el que le dé el dueño en el panel (roles/{uid})
+    let emailRole = roleOfEmail(user.email);
+    if (!emailRole) {
+      try {
+        const r = await getDoc(doc(db, "roles", user.uid));
+        if (r.exists() && r.data().role === "coowner") emailRole = "coowner";
+      } catch (e) { console.error(e); }
+      // si le dan o le quitan el rango con la web abierta, se recarga
+      unsubs.push(onSnapshot(doc(db, "roles", user.uid), (s) => {
+        const nr = s.exists() && s.data().role === "coowner" ? "coowner" : null;
+        if (nr !== emailRole) location.reload();
+      }, () => {}));
+    }
     const emailIsAdmin = Boolean(emailRole);
-    isAdmin = emailIsAdmin && user.emailVerified;
+    if (emailIsAdmin && !user.emailVerified) {
+      // ¿ya ha abierto el enlace? actualizar sin tener que salir y entrar
+      try {
+        await user.reload();
+        if (auth.currentUser?.emailVerified) await auth.currentUser.getIdToken(true);
+      } catch (e) { console.error(e); }
+    }
+    const verifiedNow = Boolean(auth.currentUser?.emailVerified);
+    if (emailRole === "coowner" && !verifiedNow) {
+      // mandarle solo el enlace para activar el rango (como mucho una vez al día)
+      const key = "rankLink:" + user.uid;
+      let last = 0;
+      try { last = Number(localStorage.getItem(key)) || 0; } catch { /* sin almacenamiento */ }
+      if (Date.now() - last > 864e5) {
+        sendEmailVerification(user).then(() => {
+          try { localStorage.setItem(key, String(Date.now())); } catch { /* ignorar */ }
+          toast("📧 Te he enviado un enlace a tu correo para activar tu rango de co-dueño.");
+        }).catch((e) => console.error(e));
+      }
+    }
+    isAdmin = emailIsAdmin && verifiedNow;
     myRole = isAdmin ? emailRole : null;
     document.body.classList.toggle("coowner", myRole === "coowner");
     $("#admin-title").textContent = myRole === "coowner" ? "🤝 Panel de co-dueño" : "🛠️ Panel de administrador";
-    show($("#verify-banner"), (emailIsAdmin || !CODES_ON) && !user.emailVerified);
-    $("#verify-why").textContent = emailIsAdmin ? "para activar el panel de administrador" : "para poder hacer pedidos";
+    show($("#verify-banner"), (emailIsAdmin || !CODES_ON) && !verifiedNow);
+    $("#verify-why").textContent = emailRole === "coowner" ? "para activar tu rango de 🤝 co-dueño"
+      : emailIsAdmin ? "para activar el panel de administrador" : "para poder hacer pedidos";
     show($("#nav-admin"), isAdmin);
     show($("#nav-chat"), !emailIsAdmin);
 
@@ -770,13 +803,22 @@ function start() {
       if (myRole === "owner") {
         unsubs.push(onSnapshot(collection(db, "bans"), (snap) => {
           allBans = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-          migrateConfigBans();
           renderBans();
         }, (e) => console.error(e)));
         unsubs.push(onSnapshot(collection(db, "users"), (snap) => {
           allUsers = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
           renderBans();
+          renderRoles();
           renderAnalytics();
+          runSeeds();
+        }, (e) => console.error(e)));
+        unsubs.push(onSnapshot(collection(db, "roles"), (snap) => {
+          allRoles = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          renderRoles();
+        }, (e) => console.error(e)));
+        unsubs.push(onSnapshot(doc(db, "settings", "migrations"), (snap) => {
+          migrationsDone = snap.exists() ? (snap.data().applied || []) : [];
+          runSeeds();
         }, (e) => console.error(e)));
       }
       unsubs.push(onSnapshot(
@@ -1890,16 +1932,86 @@ function start() {
   // ---------- Ban: banear y desbanear cuentas ----------
   let allBans = [];
   let allUsers = [];
-  let migrated = false;
   const isMe = (email) => (email || "").toLowerCase() === ADMIN_EMAIL.toLowerCase();
 
-  // los correos de BANNED_EMAILS (config.js) pasan solos a la lista de baneos
-  function migrateConfigBans() {
-    if (migrated) return;
-    migrated = true;
-    (BANNED_EMAILS || []).map((e) => e.toLowerCase()).filter((e) => !isMe(e) && !allBans.some((b) => b.id === e))
-      .forEach((e) => setDoc(doc(db, "bans", e), { email: e, reason: "", at: serverTimestamp() }).catch(console.error));
+  // ---------- Roles: dar y quitar rangos ----------
+  let allRoles = [];
+  let migrationsDone = null;
+  let seeding = false;
+  const ROLE_NAMES = { "": "👤 Cliente", coowner: "🤝 Co-dueño" };
+
+  // cambios de config.js (ROLE_SEEDS) que se aplican una sola vez
+  async function runSeeds() {
+    if (seeding || migrationsDone === null || !allUsers.length) return;
+    const pending = (ROLE_SEEDS || []).filter((s) => !migrationsDone.includes(s.id));
+    if (!pending.length) return;
+    seeding = true;
+    try {
+      const done = [];
+      for (const s of pending) {
+        const u = allUsers.find((x) => (x.email || "").toLowerCase() === s.email.toLowerCase());
+        if (!u) continue; // todavía no tiene cuenta: se aplicará cuando la tenga
+        const b = writeBatch(db);
+        if (s.role) b.set(doc(db, "roles", u.id), { role: s.role, email: u.email, name: u.name || "", at: serverTimestamp() });
+        if (s.unban) b.delete(doc(db, "bans", s.email.toLowerCase()));
+        await b.commit();
+        done.push(s.id);
+        toast(`${ROLE_NAMES[s.role] || ""} ${u.name || u.email}: rango devuelto.`);
+      }
+      if (done.length) await setDoc(doc(db, "settings", "migrations"), { applied: [...migrationsDone, ...done] }, { merge: true });
+    } catch (e) { console.error(e); } finally { seeding = false; }
   }
+
+  function renderRoles() {
+    const box = $("#role-list");
+    if (!box) return;
+    const q = ($("#role-search").value || "").trim().toLowerCase();
+    const list = allUsers
+      .filter((u) => !q || `${u.name} ${u.email}`.toLowerCase().includes(q))
+      .sort((a, b) => {
+        const ra = allRoles.some((r) => r.id === a.id) ? 0 : 1;
+        const rb = allRoles.some((r) => r.id === b.id) ? 0 : 1;
+        return ra - rb || (a.name || "").localeCompare(b.name || "");
+      });
+    box.innerHTML = list.length ? list.map((u) => {
+      const role = allRoles.find((r) => r.id === u.id)?.role || "";
+      const banned = allBans.some((b) => b.id === (u.email || "").toLowerCase());
+      return `<div class="ban-row">
+        <div class="ban-main"><strong>${esc(u.name)}</strong>
+          ${role ? `<span class="role ${role}">${ROLE_NAMES[role]}</span>` : ""}
+          ${banned ? `<span class="badge owes">Baneado</span>` : ""}
+          <div class="muted small">${esc(u.email)}</div></div>
+        ${isMe(u.email) ? `<span class="role owner">👑 Dueño</span>`
+          : `<select data-role-uid="${esc(u.id)}" aria-label="Rango de ${esc(u.name)}">
+              ${Object.entries(ROLE_NAMES).map(([k, v]) => `<option value="${k}" ${k === role ? "selected" : ""}>${v}</option>`).join("")}
+            </select>`}
+      </div>`;
+    }).join("") : `<div class="empty">No hay cuentas.</div>`;
+  }
+  $("#role-search").addEventListener("input", renderRoles);
+  $("#role-list").addEventListener("change", (e) => {
+    const sel = e.target.closest("[data-role-uid]");
+    if (!sel) return;
+    const u = allUsers.find((x) => x.id === sel.dataset.roleUid);
+    const role = sel.value;
+    const prev = allRoles.find((r) => r.id === u.id)?.role || "";
+    const msg = role
+      ? `¿Dar el rango ${ROLE_NAMES[role]} a ${u.name}? Le llegará un enlace a su correo al entrar para activarlo.`
+      : `¿Quitarle el rango a ${u.name}?`;
+    if (!confirm(msg)) { sel.value = prev; return; }
+    withBusy(sel, async () => {
+      if (role) {
+        const b = writeBatch(db);
+        b.set(doc(db, "roles", u.id), { role, email: u.email, name: u.name || "", at: serverTimestamp() });
+        b.delete(doc(db, "bans", (u.email || "").toLowerCase())); // con rango no puede estar baneado
+        await b.commit();
+        toast(`${ROLE_NAMES[role]} dado a ${u.name}. 📧 Le llegará el enlace al entrar.`);
+      } else {
+        await deleteDoc(doc(db, "roles", u.id));
+        toast(`Rango quitado a ${u.name}.`);
+      }
+    });
+  });
 
   async function banEmail(email, reason = "") {
     const e = email.trim().toLowerCase();

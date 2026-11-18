@@ -17,11 +17,12 @@ service cloud.firestore {
     }
 
     // Co-dueño: gestiona pedidos y chats, pero no el dinero, los precios ni borrar
-    // (ahora mismo no hay co-dueños: para añadir uno, pon su correo en la lista)
+    // Co-dueño: el dueño le da el rango en el panel (roles/{uid}) y su correo tiene que estar verificado
     function isCoOwner() {
       return signedIn()
-        && request.auth.token.email in []
-        && request.auth.token.email_verified == true;
+        && request.auth.token.email_verified == true
+        && exists(/databases/$(database)/documents/roles/$(request.auth.uid))
+        && get(/databases/$(database)/documents/roles/$(request.auth.uid)).data.role == 'coowner';
     }
 
     // Cuentas baneadas (se gestionan en el panel → Ban): no pueden pedir, chatear ni nada
@@ -50,6 +51,13 @@ service cloud.firestore {
         && (!('username' in request.resource.data)
             || getAfter(/databases/$(database)/documents/usernames/$(request.resource.data.username)).data.uid == request.auth.uid);
       allow delete: if isOwner();
+    }
+
+    // ---------- Rangos (los da el dueño en el panel → Roles) ----------
+    match /roles/{uid} {
+      allow get: if isOwner() || (signedIn() && request.auth.uid == uid);
+      allow list: if isOwner();
+      allow write: if isOwner();
     }
 
     // ---------- Baneos ----------

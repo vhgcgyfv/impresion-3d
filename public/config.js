@@ -24,9 +24,11 @@ export const ADMIN_EMAIL = "o39459309@gmail.com";
 //     ni borrar. OJO: si lo cambias, cámbialo también en firestore.rules
 export const COOWNER_EMAILS = [];
 
-// 3a-bis) Los baneos se gestionan en el panel admin → pestaña «Ban».
-//         Los correos de esta lista se añaden solos a esa pestaña al abrir el panel.
-export const BANNED_EMAILS = ["martincsurcui@gmail.com"];
+// 3a-bis) Los baneos y los rangos se gestionan en el panel admin (pestañas «Ban» y «Roles»).
+//         ROLE_SEEDS: cambios que se aplican UNA sola vez al abrir el panel del dueño.
+export const ROLE_SEEDS = [
+  { id: "2026-11-martin-codueno", email: "martincsurcui@gmail.com", role: "coowner", unban: true },
+];
 
 // 3b) Envío del código de verificación al crear cuenta (EmailJS, gratis).
 //     Mientras esté vacío, en vez de un código se manda un enlace de verificación.
@@ -57,7 +59,7 @@ export const PRODUCTS = [
 // 6) Códigos de apoyo válidos (en minúsculas).
 //    discount = % de descuento · rickroll = sale el vídeo 5 segundos al ponerlo
 export const PROMO_CODES = {
-  // ejemplo: micodigo: { discount: 10, rickroll: true },
+  manchis14: { discount: 10, rickroll: true },
 };
 
 // 7) Ofertas. "items" = lo que incluye, "free" = lo que sale gratis
