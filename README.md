@@ -6,6 +6,7 @@ Web para que tus amigos te pidan impresiones 3D:
 - **Pedidos**: eligen productos con precio fijo (**Fennec 0,50 €**, **Balón 0,25 €**), escriben detalles en un cuadro de texto, pueden elegir una **oferta**, la **versión llavero (+0,10 €)** y un **código de apoyo**. Ven el total aproximado al momento.
 - **Código `manchis14`**: al escribirlo sale una sorpresa de 5 segundos 🎵 y luego se aplica un **10 % de descuento**.
 - **Solo pago en efectivo.**
+- **Co-dueño** (`martincsurcui@gmail.com`): gestiona pedidos (aceptar, precio, hora, lugar, estado, «cómo va») y contesta chats con la etiqueta «🤝 Co-dueño». No puede tocar pagos, precios, borrar pedidos ni usar «sin filamento». Se cambia en `COOWNER_EMAILS` (`public/config.js`) **y** en `firestore.rules`.
 - **Panel de admin** (solo `o39459309@gmail.com`):
   - Aceptar / rechazar pedidos poniendo **precio, hora y lugar de recogida** (y una nota opcional).
   - Marcar pedidos como *listo* / *entregado*.

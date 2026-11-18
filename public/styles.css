@@ -292,3 +292,10 @@ input[type=range] { padding: 0; accent-color: var(--primary); }
 @media (min-width: 760px) {
   .chats-layout { grid-template-columns: 280px 1fr; align-items: start; }
 }
+
+/* ---------- Co-dueño: oculta lo que solo puede hacer el dueño ---------- */
+body.coowner .owner-only { display: none !important; }
+.role { font-size: .7rem; font-weight: 800; padding: 2px 8px; border-radius: 999px; justify-self: start; }
+.role.owner { background: #ffe9a8; color: #7a5600; }
+.role.coowner { background: #d8f3ff; color: #075985; }
+.msg.me .role { background: rgba(255,255,255,.25); color: #fff; }

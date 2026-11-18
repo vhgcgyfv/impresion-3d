@@ -9,7 +9,7 @@ import {
   query, where, orderBy, onSnapshot, serverTimestamp, increment, limit,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {
-  firebaseConfig, SITE_NAME, EMAILJS, ADMIN_EMAIL, KEYCHAIN_EXTRA, PRODUCTS, PROMO_CODES, OFFERS, PICKUP_PLACES,
+  firebaseConfig, SITE_NAME, EMAILJS, ADMIN_EMAIL, COOWNER_EMAILS, KEYCHAIN_EXTRA, PRODUCTS, PROMO_CODES, OFFERS, PICKUP_PLACES,
 } from "./config.js";
 
 // ---------------------------------------------------------------- utilidades
@@ -162,6 +162,14 @@ const STATUS = {
 const BILLABLE = ["aceptado", "listo", "entregado"];
 const CODES_ON = Boolean(EMAILJS?.serviceId && EMAILJS?.templateId && EMAILJS?.publicKey);
 const USERNAME_RE = /^[A-Za-z0-9_.]{3,20}$/;
+// "owner" = dueño, "coowner" = co-dueño, null = amigo
+const roleOfEmail = (email) => {
+  const e = (email || "").toLowerCase();
+  if (e === ADMIN_EMAIL.toLowerCase()) return "owner";
+  if ((COOWNER_EMAILS || []).some((x) => x.toLowerCase() === e)) return "coowner";
+  return null;
+};
+const ROLE_LABEL = { owner: "👑 Dueño", coowner: "🤝 Co-dueño" };
 
 let toastTimer;
 function toast(msg, isError = false) {
@@ -219,7 +227,8 @@ function start() {
 
   let currentUser = null;
   let profileName = "";
-  let isAdmin = false;
+  let isAdmin = false; // dueño o co-dueño (verificado)
+  let myRole = null;  // "owner" | "coowner" | null
   let unsubs = [];
   let myOrders = [];
   let allOrders = [];
@@ -408,7 +417,7 @@ function start() {
       await updateProfile(cred.user, { displayName: p.username });
       // Firebase solo marca el correo como verificado con su enlace: hace falta
       // para el admin siempre, y para todos si no hay códigos configurados.
-      if (!CODES_ON || cred.user.email.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
+      if (!CODES_ON || roleOfEmail(cred.user.email)) {
         await sendEmailVerification(cred.user);
       }
       renderHeader();
@@ -543,8 +552,12 @@ function start() {
     show($("#auth-view"), false);
     show($("#nav"));
 
-    const emailIsAdmin = user.email?.toLowerCase() === ADMIN_EMAIL.toLowerCase();
+    const emailRole = roleOfEmail(user.email);
+    const emailIsAdmin = Boolean(emailRole);
     isAdmin = emailIsAdmin && user.emailVerified;
+    myRole = isAdmin ? emailRole : null;
+    document.body.classList.toggle("coowner", myRole === "coowner");
+    $("#admin-title").textContent = myRole === "coowner" ? "🤝 Panel de co-dueño" : "🛠️ Panel de administrador";
     show($("#verify-banner"), (emailIsAdmin || !CODES_ON) && !user.emailVerified);
     $("#verify-why").textContent = emailIsAdmin ? "para activar el panel de administrador" : "para poder hacer pedidos";
     show($("#nav-admin"), isAdmin);
@@ -795,8 +808,8 @@ function start() {
     $("#stats").innerHTML = `
       <div class="stat"><div class="n">${pend}</div><div class="l">Pedidos pendientes</div></div>
       <div class="stat"><div class="n">${allOrders.filter((o) => ["aceptado", "listo"].includes(o.status)).length}</div><div class="l">Aceptados / listos</div></div>
-      <div class="stat"><div class="n">${money(cobrado)}</div><div class="l">Cobrado</div></div>
-      <div class="stat"><div class="n">${money(debe)}</div><div class="l">Te deben</div></div>
+      <div class="stat owner-only"><div class="n">${money(cobrado)}</div><div class="l">Cobrado</div></div>
+      <div class="stat owner-only"><div class="n">${money(debe)}</div><div class="l">Te deben</div></div>
       ${CODE_LIST.length ? `<div class="stat hl"><div class="n">${codePeople}</div><div class="l">Personas con «${esc(CODE_LIST[0])}» (${codeUses.length} pedidos)</div></div>` : ""}`;
   }
 
@@ -872,7 +885,7 @@ function start() {
         ${isPending ? priceForm(o, false) : ""}
         ${billable ? `
           <div class="actions">
-            <button class="btn small ${o.paid ? "" : "ok"}" data-act="paid" data-id="${o.id}">
+            <button class="btn small owner-only ${o.paid ? "" : "ok"}" data-act="paid" data-id="${o.id}">
               ${o.paid ? "↩️ Marcar como NO pagado" : "💶 Marcar como pagado"}</button>
             ${o.status === "aceptado" ? `<button class="btn small" data-act="ready" data-id="${o.id}">📦 Marcar listo</button>` : ""}
             ${o.status !== "entregado" ? `<button class="btn small" data-act="delivered" data-id="${o.id}">🤝 Marcar entregado</button>` : ""}
@@ -883,7 +896,7 @@ function start() {
         <div class="actions">
           ${["rechazado", "cancelado"].includes(o.status) ? `<button class="btn small" data-act="reopen" data-id="${o.id}">Volver a pendiente</button>` : ""}
           <button class="btn small" data-act="chat" data-id="${o.id}">💬 Chat con ${esc(o.userName)}</button>
-          <button class="btn bad small" data-act="delete" data-id="${o.id}">🗑️ Borrar</button>
+          <button class="btn bad small owner-only" data-act="delete" data-id="${o.id}">🗑️ Borrar</button>
         </div>
       </div>`;
   }
@@ -1180,9 +1193,12 @@ function start() {
         const nearBottom = msgsEl.scrollHeight - msgsEl.scrollTop - msgsEl.clientHeight < 120;
         const list = snap.docs.map((d) => ({ id: d.id, ...d.data() })).reverse();
         msgsEl.innerHTML = list.length ? list.map((m) => {
-          const mine = m.from === side;
+          const by = m.from === "admin" ? (m.by || "owner") : null;
+          const mine = side === "admin" ? by === myRole : m.from === "user";
+          const label = by ? `<span class="role ${by}">${ROLE_LABEL[by]}</span>` : "";
           const pics = (m.photos || []).filter((p) => PHOTO_RE.test(p));
           return `<div class="msg ${mine ? "me" : "them"}">
+            ${label}
             ${m.text ? `<div>${esc(m.text)}</div>` : ""}
             ${pics.length ? `<div class="photos">${pics.map((p) => `<img src="${p}" alt="Foto" loading="lazy" data-zoom />`).join("")}</div>` : ""}
             <span class="t">${timeShort(m.createdAt)}</span>
@@ -1202,7 +1218,7 @@ function start() {
       withBusy(form.querySelector("button[type=submit]"), async () => {
         const b = writeBatch(db);
         b.set(doc(collection(db, "chats", meta.uid, "messages")), side === "admin"
-          ? { from: "admin", text, photos: sendPhotos, createdAt: serverTimestamp() }
+          ? { from: "admin", by: myRole, text, photos: sendPhotos, createdAt: serverTimestamp() }
           : { from: "user", text, createdAt: serverTimestamp() });
         const preview = text || (sendPhotos.length ? "📷 Foto" : "");
         b.set(doc(db, "chats", meta.uid), {
@@ -1212,6 +1228,7 @@ function start() {
           lastText: preview.slice(0, 120),
           lastAt: serverTimestamp(),
           lastFrom: side,
+          ...(side === "admin" && { lastBy: myRole }),
           ...(side === "admin" ? { unreadUser: increment(1) } : { unreadAdmin: increment(1) }),
         }, { merge: true });
         ta.value = "";
@@ -1234,7 +1251,7 @@ function start() {
     if (userChatPanel) return;
     userChatPanel = createChatPanel($("#user-chat"), {
       side: "user",
-      title: "🧊 Vendedor",
+      title: "🧊 Vendedores",
       meta: { uid: currentUser.uid, userName: (profileName || currentUser.email).slice(0, 60), userEmail: currentUser.email },
     });
     markRead();
@@ -1250,7 +1267,7 @@ function start() {
         <span class="avatar" aria-hidden="true">${esc((c.userName || "?").slice(0, 1).toUpperCase())}</span>
         <span class="ci-main">
           <strong>${esc(c.userName)}</strong>
-          <div class="ci-last">${c.lastFrom === "admin" ? "Tú: " : ""}${esc(c.lastText || "")}</div>
+          <div class="ci-last">${c.lastFrom === "admin" ? ((c.lastBy || "owner") === myRole ? "Tú: " : `${ROLE_LABEL[c.lastBy || "owner"]}: `) : ""}${esc(c.lastText || "")}</div>
         </span>
         <span class="ci-time">${timeShort(c.lastAt)}</span>
         ${c.unreadAdmin ? `<span class="nbadge">${c.unreadAdmin}</span>` : ""}

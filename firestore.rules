@@ -9,11 +9,22 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    // Solo el correo del admin (y verificado) puede administrar
-    function isAdmin() {
+    // Dueño: puede hacerlo todo (correo verificado)
+    function isOwner() {
       return signedIn()
         && request.auth.token.email == 'o39459309@gmail.com'
         && request.auth.token.email_verified == true;
+    }
+
+    // Co-dueño: gestiona pedidos y chats, pero no el dinero, los precios ni borrar
+    function isCoOwner() {
+      return signedIn()
+        && request.auth.token.email == 'martincsurcui@gmail.com'
+        && request.auth.token.email_verified == true;
+    }
+
+    function isStaff() {
+      return isOwner() || isCoOwner();
     }
 
     function shortString(v, min, max) {
@@ -22,7 +33,7 @@ service cloud.firestore {
 
     // ---------- Perfiles de usuario ----------
     match /users/{uid} {
-      allow read: if isAdmin() || (signedIn() && request.auth.uid == uid);
+      allow read: if isStaff() || (signedIn() && request.auth.uid == uid);
       allow create, update: if signedIn()
         && request.auth.uid == uid
         && request.resource.data.keys().hasOnly(['name', 'username', 'email', 'createdAt'])
@@ -31,7 +42,7 @@ service cloud.firestore {
         // el usuario tiene que ser suyo de verdad (reservado en /usernames)
         && (!('username' in request.resource.data)
             || getAfter(/databases/$(database)/documents/usernames/$(request.resource.data.username)).data.uid == request.auth.uid);
-      allow delete: if isAdmin();
+      allow delete: if isOwner();
     }
 
     // ---------- Nombres de usuario (para que no se repitan) ----------
@@ -41,25 +52,25 @@ service cloud.firestore {
         && name.matches('^[a-z0-9_.]{3,20}$')
         && request.resource.data.keys().hasOnly(['uid'])
         && request.resource.data.uid == request.auth.uid;
-      allow delete: if isAdmin();
+      allow delete: if isOwner();
     }
 
     // ---------- Ajustes de la tienda (precios) ----------
     // Todos pueden ver los precios; solo el admin puede cambiarlos
     match /settings/{id} {
       allow read: if true;
-      allow write: if isAdmin();
+      allow write: if isOwner();
     }
 
     // ---------- Chat de cada amigo con el vendedor ----------
     match /chats/{uid} {
-      allow read: if isAdmin() || (signedIn() && request.auth.uid == uid);
-      allow create, update: if isAdmin()
+      allow read: if isStaff() || (signedIn() && request.auth.uid == uid);
+      allow create, update: if isStaff()
         || (signedIn()
             && request.auth.uid == uid
             && request.resource.data.keys().hasOnly([
                  'uid', 'userName', 'userEmail', 'lastText', 'lastAt', 'lastFrom',
-                 'unreadAdmin', 'unreadUser'])
+                 'lastBy', 'unreadAdmin', 'unreadUser'])
             && request.resource.data.uid == uid
             && request.resource.data.userEmail == request.auth.token.email
             && shortString(request.resource.data.userName, 1, 60)
@@ -70,27 +81,28 @@ service cloud.firestore {
             && request.auth.uid == uid
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['unreadUser'])
             && request.resource.data.unreadUser == 0);
-      allow delete: if isAdmin();
+      allow delete: if isOwner();
 
       match /messages/{messageId} {
-        allow read: if isAdmin() || (signedIn() && request.auth.uid == uid);
-        // el admin puede mandar texto y fotos; el amigo, solo texto
-        allow create: if (isAdmin()
-              && request.resource.data.keys().hasOnly(['from', 'text', 'photos', 'createdAt'])
-              && request.resource.data.from == 'admin')
+        allow read: if isStaff() || (signedIn() && request.auth.uid == uid);
+        // el dueño y el co-dueño mandan texto y fotos (con su etiqueta); el amigo, solo texto
+        allow create: if (isStaff()
+              && request.resource.data.keys().hasOnly(['from', 'by', 'text', 'photos', 'createdAt'])
+              && request.resource.data.from == 'admin'
+              && request.resource.data.by == (isOwner() ? 'owner' : 'coowner'))
           || (signedIn()
               && request.auth.uid == uid
               && request.resource.data.keys().hasOnly(['from', 'text', 'createdAt'])
               && request.resource.data.from == 'user'
               && shortString(request.resource.data.text, 1, 1000)
               && request.resource.data.createdAt == request.time);
-        allow delete: if isAdmin();
+        allow delete: if isOwner();
       }
     }
 
     // ---------- Pedidos ----------
     match /orders/{orderId} {
-      allow read: if isAdmin()
+      allow read: if isStaff()
         || (signedIn() && resource.data.uid == request.auth.uid);
 
       // Un amigo solo puede crear pedidos "pendiente", sin precio ni pago
@@ -111,22 +123,28 @@ service cloud.firestore {
         && request.resource.data.paid == false
         && request.resource.data.createdAt == request.time;
 
-      // El admin puede cambiarlo todo; el amigo solo puede cancelar si sigue pendiente
-      allow update: if isAdmin()
+      // El dueño puede cambiarlo todo; el co-dueño todo menos el dinero;
+      // el amigo solo puede cancelar si sigue pendiente
+      allow update: if isOwner()
+        || (isCoOwner()
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                 'status', 'price', 'discountPct', 'total', 'pickupTime', 'pickupPlace',
+                 'adminNote', 'acceptedAt', 'deliveredAt', 'progress', 'updatesCount',
+                 'lastUpdateAt']))
         || (signedIn()
             && resource.data.uid == request.auth.uid
             && resource.data.status == 'pendiente'
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status'])
             && request.resource.data.status == 'cancelado');
 
-      allow delete: if isAdmin();
+      allow delete: if isOwner();
 
-      // Novedades del pedido (cómo va + fotos): solo el admin publica,
-      // y solo el dueño del pedido las puede ver
+      // Novedades del pedido (cómo va + fotos): las publica el equipo,
+      // y solo el amigo que hizo el pedido las puede ver
       match /updates/{updateId} {
-        allow read: if isAdmin()
+        allow read: if isStaff()
           || (signedIn() && resource.data.uid == request.auth.uid);
-        allow write: if isAdmin();
+        allow write: if isStaff();
       }
     }
   }
