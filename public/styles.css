@@ -320,3 +320,6 @@ body.coowner .owner-only { display: none !important; }
 .stepper .btn:disabled, .stepper input:disabled { opacity: .4; cursor: not-allowed; }
 .stock-in { display: inline-flex; align-items: center; gap: 4px; font-size: .8rem; font-weight: 600; flex: none; }
 .stock-in input { width: 64px; }
+
+/* ---------- Nota de precio ---------- */
+.price-note { margin: 0; font-size: .85rem; color: var(--muted); background: var(--info-bg); border-radius: 10px; padding: 8px 12px; }
