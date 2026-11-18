@@ -122,7 +122,7 @@
             <span>Versión <strong>llavero</strong> <em id="keychain-price"></em></span>
           </label>
 
-          <label>Código de apoyo (opcional)
+          <label id="promo-field">Código de apoyo (opcional)
             <input name="promoCode" maxlength="30" autocomplete="off" placeholder="Si tienes uno, ponlo aquí" />
           </label>
           <div id="code-msg" class="code-msg"></div>
@@ -172,7 +172,8 @@
         <button class="tab" data-admin-tab="chats">Chats<span id="chats-badge" class="nbadge hidden"></span></button>
         <button class="tab owner-only" data-admin-tab="accounts">Cuentas (pagos)</button>
         <button class="tab owner-only" data-admin-tab="prices">Precios</button>
-        <button class="tab" data-admin-tab="codes">Códigos</button>
+        <button class="tab" data-admin-tab="codes" id="codes-tab">Códigos</button>
+        <button class="tab owner-only" data-admin-tab="bans">🚫 Ban</button>
       </div>
 
       <div id="admin-orders" data-admin-panel="orders">
@@ -201,6 +202,31 @@
       <div id="admin-accounts" data-admin-panel="accounts" class="hidden owner-only"></div>
       <div id="admin-prices" data-admin-panel="prices" class="hidden owner-only"></div>
       <div id="admin-codes" data-admin-panel="codes" class="hidden"></div>
+      <div id="admin-bans" data-admin-panel="bans" class="hidden owner-only">
+        <div class="card">
+          <h3>🚫 Banear a alguien</h3>
+          <p class="muted small">Una cuenta baneada no puede hacer pedidos ni usar el chat. Al entrar solo ve «Tu cuenta está bloqueada».</p>
+          <form id="ban-form" class="form ban-form">
+            <label>Correo de la cuenta
+              <input name="email" type="email" required list="users-emails" placeholder="correo@ejemplo.com" autocomplete="off" />
+            </label>
+            <label>Motivo (opcional, solo lo ves tú)
+              <input name="reason" maxlength="200" />
+            </label>
+            <button class="btn bad" type="submit">🚫 Banear</button>
+          </form>
+          <datalist id="users-emails"></datalist>
+        </div>
+        <div class="card">
+          <h3>Cuentas baneadas</h3>
+          <div id="ban-list" class="list"></div>
+        </div>
+        <div class="card">
+          <h3>Todas las cuentas</h3>
+          <input id="user-search" type="search" placeholder="Buscar por nombre o correo…" />
+          <div id="user-list" class="user-list"></div>
+        </div>
+      </div>
     </section>
   </main>
 

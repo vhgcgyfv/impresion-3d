@@ -350,3 +350,10 @@ body.coowner .owner-only { display: none !important; }
 /* ---------- Cuenta bloqueada ---------- */
 .blocked { text-align: center; max-width: 420px; margin: 40px auto; border: 2px solid var(--bad); }
 .blocked-ico { font-size: 3.5rem; }
+
+/* ---------- Ban ---------- */
+.ban-form { grid-template-columns: 1fr; }
+.ban-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.ban-row:last-child { border-bottom: 0; }
+.ban-main { min-width: 0; overflow-wrap: anywhere; }
+.user-list { margin-top: 10px; max-height: 420px; overflow-y: auto; }
