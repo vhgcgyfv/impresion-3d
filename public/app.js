@@ -6,7 +6,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
   getFirestore, connectFirestoreEmulator, collection, addDoc, doc, setDoc, getDoc, updateDoc, deleteDoc, writeBatch,
-  query, where, orderBy, onSnapshot, serverTimestamp, increment,
+  query, where, orderBy, onSnapshot, serverTimestamp, increment, limit,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {
   firebaseConfig, SITE_NAME, EMAILJS, ADMIN_EMAIL, KEYCHAIN_EXTRA, PRODUCTS, PROMO_CODES, OFFERS, PICKUP_PLACES,
@@ -491,14 +491,21 @@ function start() {
   }
 
   // ---------- Navegación ----------
+  let currentView = "";
   function setView(view) {
+    currentView = view;
     show($("#client-view"), view === "client");
     show($("#admin-view"), view === "admin");
+    show($("#chat-view"), view === "chat");
     $("#nav-client").classList.toggle("active", view === "client");
     $("#nav-admin").classList.toggle("active", view === "admin");
+    $("#nav-chat").classList.toggle("active", view === "chat");
+    if (view === "chat") openUserChat();
+    else if (userChatPanel) { userChatPanel.close(); userChatPanel = null; }
   }
   $("#nav-client").addEventListener("click", () => setView("client"));
   $("#nav-admin").addEventListener("click", () => setView("admin"));
+  $("#nav-chat").addEventListener("click", () => setView("chat"));
 
   function renderHeader() {
     $("#nav-user").textContent = profileName || currentUser?.email || "";
@@ -512,6 +519,13 @@ function start() {
     Object.values(updUnsubs).forEach((u) => u());
     updUnsubs = {};
     updatesCache = {};
+    userChatPanel?.close();
+    userChatPanel = null;
+    adminChatPanel?.close();
+    adminChatPanel = null;
+    myChat = null;
+    allChats = [];
+    firstChatsLoad = true;
     currentUser = user;
     show($("#loading"), false);
 
@@ -534,6 +548,7 @@ function start() {
     show($("#verify-banner"), (emailIsAdmin || !CODES_ON) && !user.emailVerified);
     $("#verify-why").textContent = emailIsAdmin ? "para activar el panel de administrador" : "para poder hacer pedidos";
     show($("#nav-admin"), isAdmin);
+    show($("#nav-chat"), !emailIsAdmin);
 
     if (registering) {
       // createAccount se encarga del perfil
@@ -568,8 +583,29 @@ function start() {
         },
         (e) => toast(authError(e), true),
       ));
+      unsubs.push(onSnapshot(
+        query(collection(db, "chats"), orderBy("lastAt", "desc")),
+        (snap) => {
+          allChats = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          checkNewChatMessages(snap);
+          renderChatList();
+        },
+        (e) => console.error(e),
+      ));
       setView("admin");
     } else {
+      let prevUnread = null;
+      unsubs.push(onSnapshot(doc(db, "chats", user.uid), (snap) => {
+        myChat = snap.exists() ? snap.data() : null;
+        const unread = myChat?.unreadUser || 0;
+        $("#chat-badge").textContent = unread;
+        show($("#chat-badge"), unread > 0 && currentView !== "chat");
+        if (prevUnread !== null && unread > prevUnread && currentView !== "chat") {
+          toast("💬 Tienes un mensaje nuevo del vendedor");
+        }
+        prevUnread = unread;
+        if (currentView === "chat") markRead();
+      }, (e) => console.error(e)));
       setView("client");
     }
   });
@@ -846,6 +882,7 @@ function start() {
           <details><summary>Editar precio / hora / lugar</summary>${priceForm(o, true)}</details>` : ""}
         <div class="actions">
           ${["rechazado", "cancelado"].includes(o.status) ? `<button class="btn small" data-act="reopen" data-id="${o.id}">Volver a pendiente</button>` : ""}
+          <button class="btn small" data-act="chat" data-id="${o.id}">💬 Chat con ${esc(o.userName)}</button>
           <button class="btn bad small" data-act="delete" data-id="${o.id}">🗑️ Borrar</button>
         </div>
       </div>`;
@@ -933,6 +970,9 @@ function start() {
           break;
         case "updates":
           openUpdates(o);
+          break;
+        case "chat":
+          openAdminChat({ uid: o.uid, userName: o.userName, userEmail: o.userEmail });
           break;
         case "delete":
           if (!confirm("¿Borrar este pedido para siempre?")) return;
@@ -1072,6 +1112,199 @@ function start() {
     });
     if (notifyOn) beep();
     if (document.hidden || !document.hasFocus()) { unseen += added.length; setTitleBadge(); }
+  }
+
+  // =================================================================== CHAT
+  // chats/{uid}: un chat por amigo con el vendedor. Mensajes en chats/{uid}/messages
+  let userChatPanel = null;
+  let adminChatPanel = null;
+  let myChat = null;
+  let allChats = [];
+  let firstChatsLoad = true;
+  let adminChatUid = null;
+
+  const timeShort = (ts) => {
+    if (!ts?.toDate) return "ahora";
+    const d = ts.toDate();
+    const today = new Date().toDateString() === d.toDateString();
+    return d.toLocaleString("es-ES", today ? { hour: "2-digit", minute: "2-digit" } : { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  };
+
+  // Crea un panel de chat dentro de `root`. side = "user" | "admin"
+  function createChatPanel(root, { meta, side, title }) {
+    const canPhoto = side === "admin";
+    root.innerHTML = `
+      <div class="chat-head"><div><div class="who">${esc(title)}</div>
+        ${side === "admin" ? `<div class="muted small">${esc(meta.userEmail || "")}</div>` : ""}</div>
+        ${side === "admin" ? `<button type="button" class="btn ghost small" data-chat-close aria-label="Cerrar chat">✕</button>` : ""}</div>
+      <div class="chat-msgs" aria-live="polite"><div class="chat-empty">Cargando…</div></div>
+      <div class="photos chat-previews"></div>
+      <form class="chat-form">
+        ${canPhoto ? `<label class="btn small" title="Mandar fotos" aria-label="Mandar fotos">📷<input type="file" accept="image/*" multiple class="visually-hidden" data-chat-files /></label>` : ""}
+        <textarea rows="1" maxlength="1000" placeholder="Escribe un mensaje…" aria-label="Mensaje"></textarea>
+        <button class="btn primary" type="submit">Enviar</button>
+      </form>`;
+    const msgsEl = root.querySelector(".chat-msgs");
+    const form = root.querySelector(".chat-form");
+    const ta = form.querySelector("textarea");
+    const prevEl = root.querySelector(".chat-previews");
+    let photos = [];
+
+    const renderPrev = () => {
+      prevEl.innerHTML = photos.map((p, i) => `<div class="thumb"><img src="${p}" alt="Foto ${i + 1}" /><button type="button" data-rm="${i}" aria-label="Quitar foto">✕</button></div>`).join("");
+    };
+    prevEl.addEventListener("click", (e) => {
+      const i = e.target.closest("[data-rm]")?.dataset.rm;
+      if (i != null) { photos.splice(Number(i), 1); renderPrev(); }
+    });
+    root.querySelector("[data-chat-files]")?.addEventListener("change", async (e) => {
+      const files = [...e.target.files];
+      e.target.value = "";
+      for (const f of files.slice(0, Math.max(0, MAX_PHOTOS - photos.length))) {
+        try { photos.push(await compressImage(f)); } catch (err) { toast(err.message, true); }
+        renderPrev();
+      }
+      if (files.length + photos.length > MAX_PHOTOS) toast(`Máximo ${MAX_PHOTOS} fotos por mensaje.`, true);
+    });
+    ta.addEventListener("input", () => { ta.style.height = "auto"; ta.style.height = Math.min(ta.scrollHeight, 120) + "px"; });
+    ta.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey && window.matchMedia("(pointer: fine)").matches) {
+        e.preventDefault();
+        form.requestSubmit();
+      }
+    });
+
+    const unsub = onSnapshot(
+      query(collection(db, "chats", meta.uid, "messages"), orderBy("createdAt", "desc"), limit(150)),
+      (snap) => {
+        const nearBottom = msgsEl.scrollHeight - msgsEl.scrollTop - msgsEl.clientHeight < 120;
+        const list = snap.docs.map((d) => ({ id: d.id, ...d.data() })).reverse();
+        msgsEl.innerHTML = list.length ? list.map((m) => {
+          const mine = m.from === side;
+          const pics = (m.photos || []).filter((p) => PHOTO_RE.test(p));
+          return `<div class="msg ${mine ? "me" : "them"}">
+            ${m.text ? `<div>${esc(m.text)}</div>` : ""}
+            ${pics.length ? `<div class="photos">${pics.map((p) => `<img src="${p}" alt="Foto" loading="lazy" data-zoom />`).join("")}</div>` : ""}
+            <span class="t">${timeShort(m.createdAt)}</span>
+          </div>`;
+        }).join("") : `<div class="chat-empty">${side === "user" ? "Escríbeme lo que quieras 👋" : "Todavía no hay mensajes. ¡Escríbele!"}</div>`;
+        if (nearBottom || snap.docChanges().some((c) => c.doc.metadata.hasPendingWrites)) msgsEl.scrollTop = msgsEl.scrollHeight;
+      },
+      (e) => { msgsEl.innerHTML = `<div class="chat-empty">${esc(authError(e))}</div>`; },
+    );
+    requestAnimationFrame(() => { msgsEl.scrollTop = msgsEl.scrollHeight; });
+
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const text = ta.value.trim().slice(0, 1000);
+      if (!text && !photos.length) return;
+      const sendPhotos = photos;
+      withBusy(form.querySelector("button[type=submit]"), async () => {
+        const b = writeBatch(db);
+        b.set(doc(collection(db, "chats", meta.uid, "messages")), side === "admin"
+          ? { from: "admin", text, photos: sendPhotos, createdAt: serverTimestamp() }
+          : { from: "user", text, createdAt: serverTimestamp() });
+        const preview = text || (sendPhotos.length ? "📷 Foto" : "");
+        b.set(doc(db, "chats", meta.uid), {
+          uid: meta.uid,
+          userName: meta.userName,
+          userEmail: meta.userEmail,
+          lastText: preview.slice(0, 120),
+          lastAt: serverTimestamp(),
+          lastFrom: side,
+          ...(side === "admin" ? { unreadUser: increment(1) } : { unreadAdmin: increment(1) }),
+        }, { merge: true });
+        ta.value = "";
+        ta.style.height = "";
+        photos = [];
+        renderPrev();
+        await b.commit();
+      });
+    });
+
+    return { close: () => unsub(), focus: () => ta.focus() };
+  }
+
+  // ---- lado del amigo ----
+  function markRead() {
+    if (myChat?.unreadUser > 0) updateDoc(doc(db, "chats", currentUser.uid), { unreadUser: 0 }).catch(() => {});
+    show($("#chat-badge"), false);
+  }
+  function openUserChat() {
+    if (userChatPanel) return;
+    userChatPanel = createChatPanel($("#user-chat"), {
+      side: "user",
+      title: "🧊 Vendedor",
+      meta: { uid: currentUser.uid, userName: (profileName || currentUser.email).slice(0, 60), userEmail: currentUser.email },
+    });
+    markRead();
+  }
+
+  // ---- lado del admin ----
+  function renderChatList() {
+    const unreadTotal = allChats.reduce((s, c) => s + (c.unreadAdmin || 0), 0);
+    $("#chats-badge").textContent = unreadTotal;
+    show($("#chats-badge"), unreadTotal > 0);
+    $("#chat-list").innerHTML = allChats.length ? allChats.map((c) => `
+      <button type="button" class="chat-item ${c.uid === adminChatUid ? "active" : ""}" data-chat-uid="${esc(c.uid)}">
+        <span class="avatar" aria-hidden="true">${esc((c.userName || "?").slice(0, 1).toUpperCase())}</span>
+        <span class="ci-main">
+          <strong>${esc(c.userName)}</strong>
+          <div class="ci-last">${c.lastFrom === "admin" ? "Tú: " : ""}${esc(c.lastText || "")}</div>
+        </span>
+        <span class="ci-time">${timeShort(c.lastAt)}</span>
+        ${c.unreadAdmin ? `<span class="nbadge">${c.unreadAdmin}</span>` : ""}
+      </button>`).join("") : `<div class="empty">Todavía no te ha escrito nadie. También puedes abrir un chat desde un pedido con «💬 Chat».</div>`;
+    if (adminChatUid) {
+      const c = allChats.find((x) => x.uid === adminChatUid);
+      if (c?.unreadAdmin) updateDoc(doc(db, "chats", c.uid), { unreadAdmin: 0 }).catch(() => {});
+    }
+  }
+
+  function openAdminChat(meta) {
+    $('[data-admin-tab="chats"]').click();
+    adminChatPanel?.close();
+    adminChatUid = meta.uid;
+    show($("#admin-chat"));
+    adminChatPanel = createChatPanel($("#admin-chat"), { side: "admin", title: `💬 ${meta.userName}`, meta });
+    renderChatList();
+    $("#admin-chat").scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  $("#chat-list").addEventListener("click", (e) => {
+    const uid = e.target.closest("[data-chat-uid]")?.dataset.chatUid;
+    const c = allChats.find((x) => x.uid === uid);
+    if (c) openAdminChat({ uid: c.uid, userName: c.userName, userEmail: c.userEmail });
+  });
+  $("#admin-chat").addEventListener("click", (e) => {
+    if (!e.target.closest("[data-chat-close]")) return;
+    adminChatPanel?.close();
+    adminChatPanel = null;
+    adminChatUid = null;
+    show($("#admin-chat"), false);
+    renderChatList();
+  });
+
+  function checkNewChatMessages(snap) {
+    if (firstChatsLoad) { firstChatsLoad = false; return; }
+    snap.docChanges().forEach((c) => {
+      const d = c.doc.data();
+      if (c.doc.metadata.hasPendingWrites || d.lastFrom !== "user" || !d.unreadAdmin) return;
+      if (c.type === "removed") return;
+      const isOpen = adminChatUid === d.uid && currentView === "admin" && !document.hidden;
+      if (isOpen) return;
+      toast(`💬 ${d.userName}: ${d.lastText}`);
+      if (notifyOn) {
+        beep();
+        if ("Notification" in window && Notification.permission === "granted") {
+          try {
+            const n = new Notification(`💬 Mensaje de ${d.userName}`, { body: d.lastText, tag: "chat-" + d.uid });
+            n.onclick = () => { window.focus(); setView("admin"); openAdminChat({ uid: d.uid, userName: d.userName, userEmail: d.userEmail }); n.close(); };
+          } catch { /* ignorar */ }
+        }
+      }
+      if (document.hidden || !document.hasFocus()) { unseen += 1; setTitleBadge(); }
+    });
   }
 
   // ---------- Contar cómo va un pedido (texto, progreso y fotos) ----------

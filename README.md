@@ -13,6 +13,7 @@ Web para que tus amigos te pidan impresiones 3D:
   - **Códigos**: cuánta gente ha usado `manchis14`.
   - **Avisos de pedidos nuevos**: te llega un **correo** con cada pedido (con EmailJS) y, con el panel abierto, **suena** y sale una **notificación** (botón «Activar avisos»).
   - **Contar cómo va**: en cada pedido aceptado, publica un texto, el % de progreso y hasta 4 fotos. Solo lo ve el dueño del pedido.
+  - **Chats**: cada amigo tiene su chat privado contigo (botón «💬 Chat»). Tú los ves todos en la pestaña Chats y puedes mandar fotos. Avisa con sonido/notificación y contador de no leídos.
   - **Sin filamento**: un botón que cancela de golpe todos los pedidos pendientes y aceptados que aún no has marcado como listos (tus amigos ven el aviso).
   - **Precios**: cambia el precio de cada producto y del llavero, añade o quita productos. Tus amigos ven los precios nuevos al momento.
 - Ofertas incluidas: **2 Fennecs + balón GRATIS**.

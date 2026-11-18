@@ -51,6 +51,43 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // ---------- Chat de cada amigo con el vendedor ----------
+    match /chats/{uid} {
+      allow read: if isAdmin() || (signedIn() && request.auth.uid == uid);
+      allow create, update: if isAdmin()
+        || (signedIn()
+            && request.auth.uid == uid
+            && request.resource.data.keys().hasOnly([
+                 'uid', 'userName', 'userEmail', 'lastText', 'lastAt', 'lastFrom',
+                 'unreadAdmin', 'unreadUser'])
+            && request.resource.data.uid == uid
+            && request.resource.data.userEmail == request.auth.token.email
+            && shortString(request.resource.data.userName, 1, 60)
+            && shortString(request.resource.data.lastText, 0, 120)
+            && request.resource.data.lastFrom == 'user')
+        // el amigo marca como leídos los mensajes del vendedor
+        || (signedIn()
+            && request.auth.uid == uid
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['unreadUser'])
+            && request.resource.data.unreadUser == 0);
+      allow delete: if isAdmin();
+
+      match /messages/{messageId} {
+        allow read: if isAdmin() || (signedIn() && request.auth.uid == uid);
+        // el admin puede mandar texto y fotos; el amigo, solo texto
+        allow create: if (isAdmin()
+              && request.resource.data.keys().hasOnly(['from', 'text', 'photos', 'createdAt'])
+              && request.resource.data.from == 'admin')
+          || (signedIn()
+              && request.auth.uid == uid
+              && request.resource.data.keys().hasOnly(['from', 'text', 'createdAt'])
+              && request.resource.data.from == 'user'
+              && shortString(request.resource.data.text, 1, 1000)
+              && request.resource.data.createdAt == request.time);
+        allow delete: if isAdmin();
+      }
+    }
+
     // ---------- Pedidos ----------
     match /orders/{orderId} {
       allow read: if isAdmin()
