@@ -31,6 +31,13 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // ---------- Ajustes de la tienda (precios) ----------
+    // Todos pueden ver los precios; solo el admin puede cambiarlos
+    match /settings/{id} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
     // ---------- Pedidos ----------
     match /orders/{orderId} {
       allow read: if isAdmin()

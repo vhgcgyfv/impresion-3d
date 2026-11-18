@@ -11,6 +11,7 @@ Web para que tus amigos te pidan impresiones 3D:
   - Marcar pedidos como *listo* / *entregado*.
   - **Cuentas**: quién te ha pagado y quién te debe (y cuánto), con un botón para marcar pagado.
   - **Códigos**: cuánta gente ha usado `manchis14`.
+  - **Precios**: cambia el precio de cada producto y del llavero, añade o quita productos. Tus amigos ven los precios nuevos al momento.
 - Ofertas incluidas: **2 Fennecs + balón GRATIS**.
 
 Funciona con **Firebase** (cuentas y base de datos, gratis) y se publica en **GitHub Pages** (gratis), así que es una web de verdad en internet que cualquiera puede abrir.
@@ -59,9 +60,9 @@ Todo está en [`public/config.js`](public/config.js):
 | Qué | Dónde |
 |---|---|
 | Nombre de la web | `SITE_NAME` |
-| Productos y precios | `PRODUCTS` |
+| Productos y precios | Desde el **panel admin → Precios** (en `PRODUCTS` están los de partida) |
 | Ofertas | `OFFERS` (qué incluye y qué sale gratis) |
-| Precio del llavero | `KEYCHAIN_EXTRA` |
+| Precio del llavero | Desde el **panel admin → Precios** (en `KEYCHAIN_EXTRA` está el de partida) |
 | Códigos de apoyo (descuento y sorpresa) | `PROMO_CODES` |
 | Sitios de recogida sugeridos | `PICKUP_PLACES` |
 

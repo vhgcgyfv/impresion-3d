@@ -32,7 +32,10 @@ const shortId = (id) => id.slice(0, 6).toUpperCase();
 const offerTitle = (id) => OFFERS.find((o) => o.id === id)?.title || id;
 const CODE_LIST = Object.keys(PROMO_CODES);
 const codeInfo = (c) => (c && PROMO_CODES[c]) || null;
-const productOf = (id) => PRODUCTS.find((p) => p.id === id);
+// Precios actuales: empiezan con los de config.js y el admin los cambia desde el panel
+let catalog = PRODUCTS.map((p) => ({ ...p }));
+let keychainExtra = KEYCHAIN_EXTRA;
+const productOf = (id) => catalog.find((p) => p.id === id);
 const itemsText = (items) => Object.entries(items || {}).filter(([, q]) => q > 0)
   .map(([id, q]) => `${q}× ${productOf(id)?.name || id}`).join(", ");
 
@@ -46,7 +49,7 @@ function calcPrice({ items = {}, offer = "", keychain = false, promoCode = "" },
     for (const [id, q] of Object.entries(of.free)) offerDiscount += (productOf(id)?.price || 0) * q;
   }
   const base = round2(basePrice ?? subtotal - offerDiscount);
-  const extra = keychain ? KEYCHAIN_EXTRA : 0;
+  const extra = keychain ? keychainExtra : 0;
   const pct = codeInfo(promoCode)?.discount || 0;
   const codeDiscount = round2((base + extra) * pct / 100);
   return {
@@ -161,7 +164,6 @@ function start() {
   let allOrders = [];
 
   // ---------- Ofertas y formulario ----------
-  $("#keychain-price").textContent = `(+${money(KEYCHAIN_EXTRA)})`;
   const offerSelect = $("#offer-select");
   OFFERS.forEach((o) => offerSelect.insertAdjacentHTML("beforeend",
     `<option value="${esc(o.id)}">${esc(o.title)}</option>`));
@@ -172,7 +174,10 @@ function start() {
       <p>${esc(o.description)}</p>
       <button class="btn small" data-offer="${esc(o.id)}">La quiero</button>
     </div>`).join("") : `<p class="muted">Ahora mismo no hay ofertas.</p>`;
-  $("#products").innerHTML = PRODUCTS.map((p) => `
+  function renderProducts() {
+    const prev = getItems();
+    $("#keychain-price").textContent = `(+${money(keychainExtra)})`;
+    $("#products").innerHTML = catalog.length ? catalog.map((p) => `
     <div class="product">
       <div class="p-emoji">${esc(p.emoji)}</div>
       <div class="p-info"><strong>${esc(p.name)}</strong><span class="muted small">${money(p.price)}</span></div>
@@ -181,7 +186,10 @@ function start() {
         <input type="number" min="0" max="50" value="0" data-qty="${esc(p.id)}" aria-label="Cantidad de ${esc(p.name)}" />
         <button type="button" class="btn small" data-step="1" data-pid="${esc(p.id)}" aria-label="Añadir">+</button>
       </div>
-    </div>`).join("");
+    </div>`).join("") : `<p class="muted small">Ahora mismo no hay productos fijos: escribe abajo lo que quieres.</p>`;
+    setItems(prev);
+    updateSummary();
+  }
 
   const getItems = () => {
     const items = {};
@@ -256,6 +264,18 @@ function start() {
     codeInput.blur();
     if (info.rickroll) rickroll(apply); else apply();
   });
+
+  renderProducts();
+
+  // Precios en directo desde la base de datos
+  onSnapshot(doc(db, "settings", "shop"), (snap) => {
+    if (!snap.exists()) return;
+    const d = snap.data();
+    if (Array.isArray(d.products)) catalog = d.products;
+    if (typeof d.keychainExtra === "number") keychainExtra = d.keychainExtra;
+    renderProducts();
+    if (isAdmin) renderAdmin();
+  }, (e) => console.error(e));
 
   // ---------- Login / registro ----------
   $$("[data-auth-tab]").forEach((b) => b.addEventListener("click", () => {
@@ -433,7 +453,7 @@ function start() {
     const t = [];
     if (itemsText(o.items)) t.push(`<span class="tag">🧊 ${esc(itemsText(o.items))}</span>`);
     if (o.offer) t.push(`<span class="tag">🔥 ${esc(offerTitle(o.offer))}</span>`);
-    if (o.keychain) t.push(`<span class="tag">🔑 Llavero (+${money(KEYCHAIN_EXTRA)})</span>`);
+    if (o.keychain) t.push(`<span class="tag">🔑 Llavero</span>`);
     if (o.promoCode) t.push(`<span class="tag">🏷️ ${esc(o.promoCode)}${codeInfo(o.promoCode)?.discount ? ` (−${codeInfo(o.promoCode).discount}%)` : ""}</span>`);
     return t.length ? `<div class="tags">${t.join("")}</div>` : "";
   }
@@ -496,6 +516,7 @@ function start() {
   $("#search").addEventListener("input", renderAdminOrders);
 
   function renderAdmin() {
+    renderPricesEditor();
     renderStats();
     renderPlaces();
     renderAdminOrders();
@@ -744,6 +765,71 @@ function start() {
       await updateDoc(doc(db, "orders", id), { paid: true, paidAt: serverTimestamp() });
       toast(`💶 ${o.userName} ha pagado ${money(o.total)}.`);
     });
+  });
+
+  // ---------- Precios (editables por el admin) ----------
+  let pricesDirty = false;
+  function priceRow(p) {
+    return `<div class="price-row" data-row>
+      <input name="emoji" value="${esc(p.emoji || "")}" maxlength="8" aria-label="Emoji" class="emoji-in" />
+      <input name="name" value="${esc(p.name || "")}" maxlength="40" placeholder="Nombre" aria-label="Nombre" />
+      <label class="euro"><input name="price" type="number" min="0" step="0.01" inputmode="decimal" value="${p.price ?? ""}" aria-label="Precio" /> €</label>
+      <input name="id" type="hidden" value="${esc(p.id || "")}" />
+      <button type="button" class="btn bad small" data-del-row aria-label="Quitar producto">✕</button>
+    </div>`;
+  }
+  function renderPricesEditor() {
+    if (pricesDirty) return; // no pisar lo que el admin está editando
+    $("#admin-prices").innerHTML = `
+      <div class="card">
+        <h3>💶 Precios</h3>
+        <p class="muted small">Los cambios se ven al momento en la web de tus amigos. Los pedidos ya aceptados mantienen su precio.</p>
+        <div id="price-rows" class="price-rows">${catalog.map(priceRow).join("")}</div>
+        <button type="button" class="btn small" id="add-product">➕ Añadir producto</button>
+        <label class="keychain-row">🔑 Suplemento versión llavero
+          <span class="euro"><input id="keychain-extra" type="number" min="0" step="0.01" inputmode="decimal" value="${keychainExtra}" /> €</span>
+        </label>
+        <div class="actions">
+          <button type="button" class="btn primary" id="save-prices">Guardar precios</button>
+          <button type="button" class="btn ghost" id="reset-prices">Deshacer cambios</button>
+        </div>
+      </div>`;
+  }
+  const slug = (t) => t.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 30) || "producto";
+
+  $("#admin-prices").addEventListener("input", () => { pricesDirty = true; });
+  $("#admin-prices").addEventListener("click", (e) => {
+    if (e.target.closest("#add-product")) {
+      pricesDirty = true;
+      $("#price-rows").insertAdjacentHTML("beforeend", priceRow({ emoji: "🧊", name: "", price: "" }));
+      $("#price-rows [data-row]:last-child [name=name]").focus();
+    } else if (e.target.closest("[data-del-row]")) {
+      pricesDirty = true;
+      e.target.closest("[data-row]").remove();
+    } else if (e.target.closest("#reset-prices")) {
+      pricesDirty = false;
+      renderPricesEditor();
+    } else if (e.target.closest("#save-prices")) {
+      withBusy(e.target, async () => {
+        const used = new Set();
+        const products = $$("#price-rows [data-row]").map((r) => {
+          const name = r.querySelector("[name=name]").value.trim();
+          const price = parseFloat(r.querySelector("[name=price]").value.replace(",", "."));
+          if (!name) throw new Error("Hay un producto sin nombre.");
+          if (isNaN(price) || price < 0) throw new Error(`Pon un precio válido a «${name}».`);
+          let id = r.querySelector("[name=id]").value || slug(name);
+          while (used.has(id)) id += "-2";
+          used.add(id);
+          return { id, name, emoji: r.querySelector("[name=emoji]").value.trim(), price: round2(price) };
+        });
+        const k = parseFloat($("#keychain-extra").value.replace(",", "."));
+        if (isNaN(k) || k < 0) throw new Error("Pon un precio válido al llavero.");
+        pricesDirty = false;
+        await setDoc(doc(db, "settings", "shop"), { products, keychainExtra: round2(k), updatedAt: serverTimestamp() });
+        toast("✅ Precios guardados.");
+      });
+    }
   });
 
   // ---------- Códigos de apoyo ----------

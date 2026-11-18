@@ -207,3 +207,13 @@ td.num, th.num { text-align: right; }
 .rick-frame { aspect-ratio: 16 / 9; background: #000; border-radius: 12px; overflow: hidden; }
 .rick-frame iframe { width: 100%; height: 100%; pointer-events: none; }
 .rick-count { font-weight: 800; font-size: 1.2rem; }
+
+/* ---------- Editor de precios ---------- */
+.price-rows { display: grid; gap: 8px; margin-bottom: 10px; }
+.price-row { display: flex; gap: 8px; align-items: center; }
+.price-row input { min-width: 0; }
+.price-row .emoji-in { width: 56px; flex: none; text-align: center; }
+.price-row [name=name] { flex: 1; }
+.euro { display: inline-flex; align-items: center; gap: 4px; font-weight: 600; flex: none; }
+.euro input { width: 84px; }
+.keychain-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin: 14px 0 4px; font-weight: 600; flex-wrap: wrap; }
