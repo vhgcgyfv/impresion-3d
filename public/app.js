@@ -307,7 +307,17 @@ const PAGE_LOAD = (() => {
 })();
 // recarga hecha por la propia web (queda apuntado el motivo)
 function autoReload(reason) {
-  try { sessionStorage.setItem("autoReload", reason); } catch { /* ignorar */ }
+  // freno: si la web ya se ha recargado sola 2 veces en el último minuto, no seguir (evita bucles)
+  let recent = [];
+  try { recent = JSON.parse(sessionStorage.getItem("autoReloads") || "[]").filter((t) => Date.now() - t < 60e3); } catch { /* ignorar */ }
+  if (recent.length >= 2) {
+    console.warn("Recarga automática frenada para evitar un bucle:", reason);
+    return;
+  }
+  try {
+    sessionStorage.setItem("autoReloads", JSON.stringify([...recent, Date.now()]));
+    sessionStorage.setItem("autoReload", reason);
+  } catch { /* ignorar */ }
   location.reload();
 }
 // errores de la web (para saber si hay un fallo de verdad)
@@ -959,9 +969,9 @@ function start() {
       try {
         await user.reload();
         if (auth.currentUser?.emailVerified) {
+          // renovar el permiso y seguir SIN recargar (recargar aquí hacía un bucle en algunos móviles)
           await auth.currentUser.getIdToken(true);
-          autoReload("Verificó su correo"); // empezar de cero con el permiso nuevo
-          return;
+          verifiedNow = (await auth.currentUser.getIdTokenResult()).claims.email_verified === true;
         }
       } catch (e) { console.error(e); }
     }
