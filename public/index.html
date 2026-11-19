@@ -113,6 +113,28 @@
           <div class="field-title">Elige productos</div>
           <div id="products" class="products"></div>
 
+          <label class="check custom-toggle">
+            <input type="checkbox" name="isCustom" id="custom-toggle" />
+            <span>✨ <strong>Quiero algo personalizado</strong> (una figura que no está en la lista)</span>
+          </label>
+          <div id="custom-box" class="custom-box hidden">
+            <p class="muted small">Cuéntame tu idea abajo en «¿Algo más…?». El precio te lo digo yo cuando lo vea.</p>
+            <div class="custom-grid">
+              <label>📏 Tamaño aproximado
+                <input name="customSize" maxlength="60" placeholder="Ej: 10 cm de alto" />
+              </label>
+              <label>🎨 Color o colores
+                <input name="customColors" maxlength="80" placeholder="Ej: rojo y negro" />
+              </label>
+            </div>
+            <div class="photo-pick">
+              <label class="btn small" for="custom-files">📷 Fotos de referencia</label>
+              <input id="custom-files" type="file" accept="image/*" multiple class="visually-hidden" />
+              <span class="muted small">Hasta 3</span>
+            </div>
+            <div id="custom-previews" class="photos"></div>
+          </div>
+
           <label>¿Algo más o algún detalle? (color, tamaño, otra figura…)
             <textarea name="description" rows="3" maxlength="1000"
               placeholder="Ej: Un Fennec rojo y otro azul. O cualquier otra cosa que quieras."></textarea>
@@ -137,6 +159,10 @@
           <div id="order-summary" class="summary hidden"></div>
 
           <p class="muted small">💶 Solo pago en efectivo al recoger. Te diré la hora y el sitio para recogerlo.</p>
+          <label class="check terms-check">
+            <input type="checkbox" name="terms" id="terms-check" />
+            <span>He leído y acepto los <button type="button" class="link" id="open-terms">términos y condiciones</button></span>
+          </label>
           <button class="btn primary" type="submit">Enviar pedido</button>
         </form>
       </div>
@@ -186,6 +212,7 @@
           <button class="tab" data-admin-tab="offers" data-perm="offers">🔥 Ofertas</button>
           <button class="tab" data-admin-tab="codes" id="codes-tab" data-perm="codes">🎟️ Códigos</button>
           <button class="tab" data-admin-tab="bans" data-perm="bans">🚫 Ban</button>
+          <button class="tab" data-admin-tab="users" data-perm="users">👤 Usuarios</button>
           <button class="tab owner-only" data-admin-tab="roles">👥 Roles</button>
           <button class="tab" data-admin-tab="stats" data-perm="stats">📊 Analíticas</button>
           <button class="tab" data-admin-tab="notices" data-perm="notices">📢 Avisos</button>
@@ -245,6 +272,23 @@
         </div>
         <div id="code-usage"></div>
       </div>
+      <div id="admin-users" data-admin-panel="users" class="hidden" data-perm="users">
+        <div class="card">
+          <h3>👤 Usuarios</h3>
+          <div class="filters">
+            <input id="users-search" type="search" placeholder="Buscar por nombre, usuario o correo…" />
+            <select id="users-sort" aria-label="Ordenar">
+              <option value="new">Más nuevos</option>
+              <option value="orders">Más pedidos</option>
+              <option value="spent">Más gastado</option>
+              <option value="name">Nombre (A-Z)</option>
+            </select>
+          </div>
+          <div id="users-count" class="muted small"></div>
+          <div id="users-list" class="users-list"></div>
+        </div>
+      </div>
+
       <div id="admin-roles" data-admin-panel="roles" class="hidden owner-only">
         <div class="card">
           <h3>👥 Rangos</h3>
@@ -279,6 +323,12 @@
       </div>
 
       <div id="admin-notices" data-admin-panel="notices" class="hidden" data-perm="notices">
+        <div class="card">
+          <h3>📜 Términos y condiciones</h3>
+          <p class="muted small">Los ve la gente al pedir y tienen que aceptarlos. Una norma por línea.</p>
+          <textarea id="terms-text" rows="8" maxlength="3000"></textarea>
+          <div class="actions"><button type="button" class="btn primary" id="save-terms">Guardar términos</button></div>
+        </div>
         <div class="card">
           <h3>📢 Avisos de la web</h3>
           <p class="muted small">Salen arriba del todo, en la portada y en la página de pedidos. Puedes tener varios y encenderlos o apagarlos.</p>
@@ -359,6 +409,18 @@
       </form>
       <h4>Publicado</h4>
       <div id="upd-list" class="updates"></div>
+    </div>
+  </div>
+
+  <!-- Términos y condiciones -->
+  <div id="terms-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="terms-title">
+    <div class="modal-box">
+      <div class="modal-head">
+        <h3 id="terms-title">📜 Términos y condiciones</h3>
+        <button type="button" class="btn ghost small" id="terms-close" aria-label="Cerrar">✕</button>
+      </div>
+      <ol id="terms-list" class="terms-list"></ol>
+      <div class="actions"><button type="button" class="btn primary" id="terms-accept">✅ Acepto</button></div>
     </div>
   </div>
 

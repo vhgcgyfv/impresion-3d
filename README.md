@@ -5,6 +5,8 @@ Web para que tus amigos te pidan impresiones 3D:
 - **Cuentas**: para crear cuenta hace falta **usuario + correo + código de verificación + contraseña**. El código de 6 cifras llega al correo. No se pueden repetir usuarios.
 - **Pedidos**: eligen productos con precio fijo (**Fennec 0,50 €**, **Balón 0,25 €**), escriben detalles en un cuadro de texto, pueden elegir una **oferta**, la **versión llavero (+0,10 €)** y un **código de apoyo**. Ven el total aproximado al momento.
 - **Código `manchis14`**: sale una sorpresa y luego un **10 % de descuento**. Los códigos están en `PROMO_CODES` (`public/config.js`).
+- **✨ Pedidos personalizados**: idea, tamaño, colores y hasta 3 fotos de referencia; el precio lo pones tú.
+- **📜 Términos y condiciones**: hay que aceptarlos para pedir (también lo exige el servidor). Se editan en el panel → Avisos.
 - **Solo pago en efectivo.**
 - **👥 Roles**: en el panel das o quitas el rango de **🤝 Co-dueño** a cualquier cuenta. Al darlo, a esa persona le llega sola un enlace a su correo al entrar; cuando lo abre y recarga, ya tiene su panel. El co-dueño gestiona pedidos y chats, pero no pagos, precios, stock, baneos ni borrar.
 - **Ban**: en el panel → pestaña «🚫 Ban» baneas y desbaneas cuentas por correo (o desde la lista de cuentas). Una cuenta baneada no puede pedir ni chatear; al entrar ve «Tu cuenta está bloqueada». No hay ban por IP: sin servidor propio no se puede hacer de forma fiable.
@@ -25,6 +27,7 @@ Web para que tus amigos te pidan impresiones 3D:
   - **⏳ Bans temporales**: 1 hora, 1 día, 3 días, 1 semana, 1 mes o para siempre.
   - **⚙️ Permisos del co-dueño**: en Roles eliges qué puede hacer cada co-dueño. Las contraseñas no se pueden ver (Firebase solo guarda una huella cifrada); hay un botón para mandar el correo de cambiar contraseña.
   - **🔄 Entradas y recargas** (en Analíticas): cada entrada y recarga de cada persona, distinguiendo recarga manual, recarga hecha por la web (con motivo), cierre de la pestaña por memoria del móvil y errores de la web.
+  - **👤 Usuarios**: todas las cuentas con alta, rango, ban, pedidos, gastado y última visita, con buscador y orden.
   - **Sin filamento**: un botón que cancela de golpe todos los pedidos pendientes y aceptados que aún no has marcado como listos (tus amigos ven el aviso).
   - **Stock**: en Precios, cuántas unidades tienes hechas de cada producto (vacío = sin límite, 0 = agotado). Baja solo con cada pedido y vuelve al momento si se cancela o rechaza.
   - **Precios**: cambia el precio de cada producto y del llavero, añade o quita productos. Tus amigos ven los precios nuevos al momento.

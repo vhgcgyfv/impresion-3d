@@ -484,3 +484,25 @@ body.guest #guest-hero { display: block !important; text-align: center; margin: 
 td.hot { color: var(--bad); font-weight: 800; }
 .visit-log { display: grid; gap: 6px; margin-top: 8px; max-height: 360px; overflow-y: auto; }
 .visit { display: grid; gap: 2px; padding: 6px 0; border-bottom: 1px solid var(--line); font-size: .9rem; }
+
+/* ---------- Pedido personalizado ---------- */
+.custom-toggle { background: var(--bg); border: 1px dashed var(--primary-2); border-radius: 12px; padding: 10px 12px; }
+.custom-box { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); }
+.custom-box.hidden { display: none; }
+.custom-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+.custom-info { display: grid; gap: 4px; margin: 8px 0; padding: 10px 12px; border-left: 3px solid var(--primary-2); background: var(--bg); border-radius: 0 10px 10px 0; }
+
+/* ---------- Términos ---------- */
+.terms-check { font-weight: 500; }
+.terms-check .link { padding: 0; font-weight: 700; text-decoration: underline; }
+.terms-list { display: grid; gap: 8px; padding-left: 22px; margin: 0; line-height: 1.45; }
+.terms-key { font-weight: 800; color: var(--bad); }
+#terms-text { font-size: .92rem; }
+
+/* ---------- Usuarios ---------- */
+.users-list { display: grid; gap: 10px; margin-top: 10px; }
+.user-card { border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: grid; gap: 8px; background: var(--bg); }
+.uc-head { display: flex; gap: 10px; align-items: flex-start; }
+.uc-main { min-width: 0; overflow-wrap: anywhere; }
+.uc-stats { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: .88rem; }
+.user-card .actions { margin-top: 0; }
