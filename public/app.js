@@ -9,7 +9,7 @@ import {
   query, where, orderBy, onSnapshot, serverTimestamp, increment, limit, runTransaction, Timestamp,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {
-  firebaseConfig, SITE_NAME, PRICE_NOTICE, EMAILJS, ADMIN_EMAIL, COOWNER_EMAILS, ROLE_SEEDS, KEYCHAIN_EXTRA, PRODUCTS, PROMO_CODES, OFFERS, PICKUP_PLACES,
+  firebaseConfig, SITE_NAME, PRICE_NOTICE, TERMS, EMAILJS, ADMIN_EMAIL, COOWNER_EMAILS, ROLE_SEEDS, KEYCHAIN_EXTRA, PRODUCTS, PROMO_CODES, OFFERS, PICKUP_PLACES,
 } from "./config.js?v=__V__";
 
 // ---------------------------------------------------------------- utilidades
@@ -48,6 +48,7 @@ const PERMS = [
   ["emojis", "😀 Emojis"],
   ["bans", "🚫 Banear"],
   ["stats", "📊 Analíticas"],
+  ["users", "👤 Ver usuarios"],
 ];
 const DEFAULT_PERMS = { orders: true, chats: true };
 // Precios actuales: empiezan con los de config.js y el admin los cambia desde el panel
@@ -1043,12 +1044,13 @@ function start() {
           renderRoles();
         }, (e) => console.error(e)));
       }
-      if (myRole === "owner" || can("bans") || can("stats")) {
+      if (myRole === "owner" || can("bans") || can("stats") || can("users")) {
         unsubs.push(onSnapshot(collection(db, "users"), (snap) => {
           allUsers = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
           renderBans();
           renderRoles();
           renderAnalytics();
+          renderUsers();
           runSeeds();
         }, (e) => console.error(e)));
       }
@@ -1056,6 +1058,7 @@ function start() {
         unsubs.push(onSnapshot(query(collection(db, "visits"), orderBy("at", "desc"), limit(500)), (snap) => {
           allVisits = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
           renderAnalytics();
+          renderUsers();
         }, (e) => console.error(e)));
       }
       if (myRole === "owner") {
@@ -1101,6 +1104,51 @@ function start() {
   const orderTotal = (o) => o.total ?? o.estimate ?? 0;
   const hasPrice = (o) => o.total != null || o.estimate != null;
 
+  // ---------- Pedido personalizado ----------
+  let customPhotos = [];
+  const renderCustomPreviews = () => {
+    $("#custom-previews").innerHTML = customPhotos.map((p, i) => `<div class="thumb"><img src="${p}" alt="Referencia ${i + 1}" /><button type="button" data-rm="${i}" aria-label="Quitar foto">✕</button></div>`).join("");
+  };
+  $("#custom-toggle").addEventListener("change", (e) => show($("#custom-box"), e.target.checked));
+  $("#custom-previews").addEventListener("click", (e) => {
+    const i = e.target.closest("[data-rm]")?.dataset.rm;
+    if (i != null) { customPhotos.splice(Number(i), 1); renderCustomPreviews(); }
+  });
+  $("#custom-files").addEventListener("change", async (e) => {
+    const files = [...e.target.files];
+    e.target.value = "";
+    if (files.length + customPhotos.length > 3) toast("Como mucho 3 fotos de referencia.", true);
+    for (const f of files.slice(0, Math.max(0, 3 - customPhotos.length))) {
+      try { customPhotos.push(await compressImage(f, { side: 900, budget: 150000 })); } catch (err) { toast(err.message, true); }
+      renderCustomPreviews();
+    }
+  });
+
+  // ---------- Términos y condiciones ----------
+  let termsText = TERMS || "";
+  const termsLines = () => termsText.split("\n").map((l) => l.replace(/^\s*\d+[.)]\s*/, "").trim()).filter(Boolean);
+  function openTerms() {
+    $("#terms-list").innerHTML = termsLines().map((l, i) => `<li class="${i === 0 ? "terms-key" : ""}">${esc(l)}</li>`).join("");
+    show($("#terms-modal"));
+  }
+  $("#open-terms").addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); openTerms(); });
+  $("#terms-close").addEventListener("click", () => show($("#terms-modal"), false));
+  $("#terms-modal").addEventListener("click", (e) => { if (e.target.id === "terms-modal") show($("#terms-modal"), false); });
+  $("#terms-accept").addEventListener("click", () => { $("#terms-check").checked = true; show($("#terms-modal"), false); });
+  onSnapshot(doc(db, "settings", "terms"), (snap) => {
+    if (!snap.exists() || snap.metadata.hasPendingWrites) return;
+    termsText = snap.data().text || "";
+    if (isAdmin && document.activeElement !== $("#terms-text")) $("#terms-text").value = termsText;
+  }, (e) => console.error(e));
+  $("#terms-text").value = termsText;
+  $("#save-terms").addEventListener("click", (e) => withBusy(e.currentTarget, async () => {
+    const text = $("#terms-text").value.trim().slice(0, 3000);
+    if (!text) throw new Error("Escribe al menos una norma.");
+    await setDoc(doc(db, "settings", "terms"), { text, updatedAt: serverTimestamp() });
+    termsText = text;
+    toast("📜 Términos guardados.");
+  }));
+
   // ---------- Crear pedido ----------
   $("#order-form").addEventListener("submit", (e) => {
     e.preventDefault();
@@ -1111,9 +1159,20 @@ function start() {
     if (!CODES_ON && !currentUser.emailVerified) {
       return toast("Primero verifica tu correo con el enlace que te hemos enviado.", true);
     }
+    const isCustom = f.isCustom.checked;
     if (!description && !Object.keys(items).length) {
-      return toast("Elige algún producto o escribe qué quieres pedir.", true);
+      return toast(isCustom ? "Cuéntame tu idea en «¿Algo más…?»." : "Elige algún producto o escribe qué quieres pedir.", true);
     }
+    if (isCustom && !description) return toast("Cuéntame tu idea en «¿Algo más…?».", true);
+    if (!f.terms.checked) {
+      openTerms();
+      return toast("Para pedir tienes que aceptar los términos y condiciones.", true);
+    }
+    const custom = isCustom ? {
+      size: f.customSize.value.trim().slice(0, 60),
+      colors: f.customColors.value.trim().slice(0, 80),
+      photos: customPhotos.slice(0, 3),
+    } : null;
     if (promoCode && !codeInfo(promoCode)) {
       return toast("Ese código no existe. Revísalo o déjalo vacío.", true);
     }
@@ -1154,11 +1213,16 @@ function start() {
         }),
         paid: false,
         ...(Object.keys(fromStock).length && { fromStock }),
+        ...(custom && { custom }),
+        terms: true,
         createdAt: serverTimestamp(),
       });
       });
-      notifyAdminByEmail({ description, items, offer: f.offer.value, keychain: f.keychain.checked, promoCode });
+      notifyAdminByEmail({ description: (custom ? "✨ PERSONALIZADO: " : "") + description, items, offer: f.offer.value, keychain: f.keychain.checked, promoCode });
       f.reset();
+      customPhotos = [];
+      renderCustomPreviews();
+      show($("#custom-box"), false);
       codeApplied = "";
       codeMsg.textContent = "";
       updateSummary();
@@ -1225,6 +1289,16 @@ function start() {
   $("#lightbox").addEventListener("click", () => show($("#lightbox"), false));
 
   // ---------- Mis pedidos ----------
+  function customHtml(o) {
+    if (!o.custom) return "";
+    const pics = (o.custom.photos || []).filter((p) => PHOTO_RE.test(p));
+    return `<div class="custom-info">
+      <strong>✨ Pedido personalizado</strong>
+      ${o.custom.size ? `<div class="small">📏 ${esc(o.custom.size)}</div>` : ""}
+      ${o.custom.colors ? `<div class="small">🎨 ${esc(o.custom.colors)}</div>` : ""}
+      ${pics.length ? `<div class="photos">${pics.map((p) => `<img src="${p}" alt="Foto de referencia" data-zoom />`).join("")}</div>` : ""}
+    </div>`;
+  }
   function orderTags(o) {
     const t = [];
     if (itemsText(o.items)) t.push(`<span class="tag">🧊 ${esc(itemsText(o.items))}</span>`);
@@ -1271,6 +1345,7 @@ function start() {
           </div>
         </div>
         ${o.description ? `<div class="order-desc">${esc(o.description)}</div>` : ""}
+        ${customHtml(o)}
         ${orderTags(o)}
         ${pickupBox(o)}
         ${progressHtml(o)}
@@ -1335,6 +1410,7 @@ function start() {
   $("#search").addEventListener("input", renderAdminOrders);
 
   function renderAdmin() {
+    renderUsers();
     renderOfferEditor();
     renderEmojiEditor();
     renderPricesEditor();
@@ -1429,6 +1505,7 @@ function start() {
           </div>
         </div>
         ${o.description ? `<div class="order-desc">${esc(o.description)}</div>` : ""}
+        ${customHtml(o)}
         ${orderTags(o)}
         ${pickupBox(o)}
         ${o.adminNote && !isPending ? `<div class="note">💬 ${esc(o.adminNote)}</div>` : ""}
@@ -2285,6 +2362,82 @@ function start() {
         noticesDirty = false;
         await setDoc(doc(db, "settings", "notices"), { items, updatedAt: serverTimestamp() });
         toast("📢 Avisos guardados. Ya se ven en la web.");
+      });
+    }
+  });
+
+  // ---------- Usuarios: ver todas las cuentas ----------
+  function renderUsers() {
+    const box = $("#users-list");
+    if (!box || !can("users")) return;
+    const q = ($("#users-search").value || "").trim().toLowerCase();
+    const stats = new Map();
+    allOrders.forEach((o) => {
+      const s = stats.get(o.uid) || { n: 0, spent: 0 };
+      s.n++;
+      if (BILLABLE.includes(o.status)) s.spent += orderTotal(o);
+      stats.set(o.uid, s);
+    });
+    const lastSeen = new Map();
+    allVisits.forEach((v) => { if (!lastSeen.has(v.uid)) lastSeen.set(v.uid, v); });
+    const roleOf = (u) => (isMe(u.email) ? "owner" : allRoles.find((r) => r.id === u.id)?.role || "");
+    let list = allUsers.filter((u) => !q || `${u.name} ${u.username} ${u.email}`.toLowerCase().includes(q));
+    const sort = $("#users-sort").value;
+    list.sort((a, b) => {
+      if (sort === "orders") return (stats.get(b.id)?.n || 0) - (stats.get(a.id)?.n || 0);
+      if (sort === "spent") return (stats.get(b.id)?.spent || 0) - (stats.get(a.id)?.spent || 0);
+      if (sort === "name") return (a.name || "").localeCompare(b.name || "");
+      return (b.createdAt?.toMillis?.() || 0) - (a.createdAt?.toMillis?.() || 0);
+    });
+    $("#users-count").textContent = `${list.length} de ${allUsers.length} cuentas`;
+    box.innerHTML = list.length ? list.map((u) => {
+      const s = stats.get(u.id) || { n: 0, spent: 0 };
+      const role = roleOf(u);
+      const ban = allBans.find((b) => b.id === (u.email || "").toLowerCase());
+      const seen = lastSeen.get(u.id);
+      return `<div class="user-card">
+        <div class="uc-head">
+          <span class="avatar" aria-hidden="true">${esc((u.name || "?").slice(0, 1).toUpperCase())}</span>
+          <div class="uc-main">
+            <strong>${esc(u.name)}</strong> ${u.username ? `<span class="muted small">@${esc(u.username)}</span>` : ""}
+            ${role ? `<span class="role ${role}">${role === "owner" ? "👑 Dueño" : "🤝 Co-dueño"}</span>` : ""}
+            ${ban && banActive(ban) ? `<span class="badge owes">🚫 Baneado ${esc(banUntilText(ban))}</span>` : ""}
+            <div class="muted small">${esc(u.email)}</div>
+          </div>
+        </div>
+        <div class="uc-stats">
+          <span>📅 Alta: <strong>${u.createdAt ? fmtDate(u.createdAt) : "—"}</strong></span>
+          <span>📦 Pedidos: <strong>${s.n}</strong></span>
+          ${can("money") ? `<span>💶 Gastado: <strong>${money(s.spent)}</strong></span>` : ""}
+          ${can("stats") ? `<span>👀 Última vez: <strong>${seen ? `${fmtDate(seen.at)}` : "—"}</strong>${seen?.device ? ` <span class="muted small">(${esc(seen.device)})</span>` : ""}</span>` : ""}
+        </div>
+        <div class="actions">
+          ${can("chats") ? `<button type="button" class="btn small" data-u-chat="${esc(u.id)}">💬 Chat</button>` : ""}
+          ${can("orders") ? `<button type="button" class="btn small" data-u-orders="${esc(u.email)}">📦 Ver pedidos</button>` : ""}
+          ${myRole === "owner" ? `<button type="button" class="btn small" data-reset-pass="${esc(u.email)}">📧 Cambiar contraseña</button>` : ""}
+        </div>
+      </div>`;
+    }).join("") : `<div class="empty">No hay cuentas.</div>`;
+  }
+  $("#users-search").addEventListener("input", renderUsers);
+  $("#users-sort").addEventListener("change", renderUsers);
+  $("#users-list").addEventListener("click", (e) => {
+    const c = e.target.closest("[data-u-chat]");
+    const o = e.target.closest("[data-u-orders]");
+    const r = e.target.closest("[data-reset-pass]");
+    if (c) {
+      const u = allUsers.find((x) => x.id === c.dataset.uChat);
+      openAdminChat({ uid: u.id, userName: u.name, userEmail: u.email });
+    } else if (o) {
+      $('[data-admin-tab="orders"]').click();
+      $("#status-filter").value = "todos";
+      $("#search").value = o.dataset.uOrders;
+      renderAdminOrders();
+    } else if (r) {
+      if (!confirm(`¿Mandar a ${r.dataset.resetPass} un correo para poner una contraseña nueva?`)) return;
+      withBusy(r, async () => {
+        await sendPasswordResetEmail(auth, r.dataset.resetPass);
+        toast("📧 Correo para cambiar la contraseña enviado.");
       });
     }
   });

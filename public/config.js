@@ -46,6 +46,14 @@ export const PRICE_NOTICE = {
   text: "",
 };
 
+// 3d) Términos y condiciones (se pueden cambiar desde el panel → Avisos)
+export const TERMS = `1. Hasta que no pagues, el pedido no es tuyo. La figura es del vendedor hasta que la pagas.
+2. Solo se paga en efectivo, al recoger el pedido.
+3. En los pedidos personalizados, el precio se confirma antes de imprimir.
+4. Puedes cancelar tu pedido mientras no esté listo ni pagado.
+5. La impresión 3D puede tener pequeñas marcas o diferencias de color: es normal.
+6. El vendedor puede rechazar un pedido si no se puede imprimir.`;
+
 // 4) Suplemento por versión llavero (en euros, por pedido)
 export const KEYCHAIN_EXTRA = 0.10;
 
